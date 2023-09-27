@@ -1,0 +1,74 @@
+start: 
+    mov v0 0x00
+    mov v1 0x00
+    mov v3 0x04
+    mov v4 0x01
+
+    mov v6 0x10 
+    mov v7 0x10
+
+draw_player: 
+    I player 
+    skip_eq v4 0x00
+    cls 
+    skip_eq v4 0x00
+    draw v0 v1 0x4
+    mov v4 0x00
+    call check_input
+    jump draw_fruit
+
+draw_fruit: 
+    I fruit 
+    draw v6 v7 0x3
+    jump draw_player
+
+check_input: 
+    call check_left
+    call check_right
+    call check_up
+    call check_down
+    return 
+
+check_left: 
+    mov v2 0x07
+    skip_key_eq v2
+    return 
+    reg_sub v0 v3
+    add v4 0x03
+    return 
+
+check_right: 
+    mov v2 0x09
+    skip_key_eq v2
+    return 
+    reg_add v0 v3
+    add v4 0x01
+    return 
+
+check_up: 
+    mov v2 0x05
+    skip_key_eq v2
+    return 
+    reg_sub v1 v3
+    add v4 0x01
+    return 
+
+check_down: 
+    mov v2 0x08
+    skip_key_eq v2
+    return 
+    reg_add v1 v3
+    add v4 0x01
+    return 
+
+end:
+    jump end
+
+data: 
+player: 
+0x60 0xf0
+0xf0 0x60
+
+fruit: 
+0x00 0x60 
+0x60 0x00

@@ -1,0 +1,36 @@
+  Opcode      Keyword         Format
+ -------------------------------------------
+  00E0   |    cls          |  cls
+  00EE   |    return       |  return
+  1NNN   |    jump         |  jump xNNN
+  2NNN   |    call         |  call xNNN
+  3XNN   |    skip_eq      |  skip_eq Vx xNN
+  4XNN   |    skip_neq     |  skip_neq Vx xNN 
+  5XY0   |    skip_reg_eq  |  skip_reg_eq Vx Vy 
+  6XNN   |    mov          |  mov Vx xNN
+  7XNN   |    add          |  add Vx xNN
+  8XY0   |    set          |  set Vx Vy 
+  8XY1   |    or           |  or Vx Vy
+  8XY2   |    and          |  and Vx Vy
+  8XY3   |    xor          |  xor Vx Vy
+  8XY4   |    reg_add      |  reg_add Vx Vy
+  8XY5   |    reg_sub      |  reg_sub Vx Vy
+  8XY6   |    shr          |  shr Vx Vy
+  8XY7   |    rev_minus    |  rev_minus Vx Vy 
+  8XYE   |    shl          |  shl Vx Vy
+  9XY0   |    skip_reg_neq |  skip_reg_neq Vx Vy 
+  ANNN   |    I            |  I xNNN 
+  BNNN   |    PC_offset    |  PC_offset xNNN
+  CXNN   |    rand         |  rand Vx xNN
+  DXYN   |    draw         |  draw Vx Vy xN
+  EX9E   |    skip_key_eq  |  skip_key_eq Vx
+  EXA1   |    skip_key_neq |  skip_key_neq Vx
+  FX07   |    get_delay    |  get_delay Vx
+  FX0A   |    get_key      |  get_key Vx
+  FX15   |    set_delay    |  set_delay Vx
+  FX18   |    set_sound    |  set_sound Vx
+  FX1E   |    add_I        |  add_I Vx 
+  FX29   |    sprite       |  sprite Vx 
+  FX33   |    bcd          |  bcd Vx 
+  FX55   |    reg_save     |  reg_save Vx 
+  FX65   |    reg_load     |  reg_load Vx 
