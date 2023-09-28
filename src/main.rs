@@ -1,6 +1,6 @@
 
 mod cpu; 
-pub use cpu::cpu::{CPU, SCREEN_WIDTH, SCREEN_HEIGHT}; 
+pub use cpu::cpu::{CPU, SCREEN_WIDTH, SCREEN_HEIGHT, Chip8Input}; 
 
 extern crate sdl2;
 
@@ -11,10 +11,41 @@ use sdl2::pixels::Color;
 use sdl2::rect::Rect;
 use sdl2::render::Canvas;
 use sdl2::video::Window; 
+
+use std::collections::HashMap; 
  
 const PIXEL_WIDTH  : usize = 10; 
 const CANVAS_WIDTH : usize = SCREEN_WIDTH * PIXEL_WIDTH; 
 const CANVAS_HEIGHT: usize = SCREEN_HEIGHT * PIXEL_WIDTH; 
+
+// maps Keycode value (from sdl2) to Chip8Input value (0-F) to simulate controller input 
+fn build_keycode_hashmap() -> HashMap<Keycode, Chip8Input>{ 
+    HashMap::from([
+        // ROW 1
+        (Keycode::Num1, Chip8Input::Num1), 
+        (Keycode::Num2, Chip8Input::Num2), 
+        (Keycode::Num3, Chip8Input::Num3), 
+        (Keycode::Num4, Chip8Input::C),
+    
+        // ROW 2
+        (Keycode::Q, Chip8Input::Num4), 
+        (Keycode::W, Chip8Input::Num5), 
+        (Keycode::E, Chip8Input::Num6), 
+        (Keycode::R, Chip8Input::D), 
+    
+        // ROW 3
+        (Keycode::A, Chip8Input::Num7), 
+        (Keycode::S, Chip8Input::Num8), 
+        (Keycode::D, Chip8Input::Num9), 
+        (Keycode::F, Chip8Input::E),
+    
+        // ROW 4 
+        (Keycode::Z, Chip8Input::A), 
+        (Keycode::X, Chip8Input::Num0), 
+        (Keycode::C, Chip8Input::B), 
+        (Keycode::V, Chip8Input::F),
+    ])
+}
 
 fn execute(mut cpu: CPU) -> Result<(), String> { 
 
@@ -44,14 +75,10 @@ fn execute(mut cpu: CPU) -> Result<(), String> {
 
     // define event_pump and frame counter for event polling and framerate control respectively
     let mut event_pump = sdl_context.event_pump()?;
-    let mut frame: u32 = 0;
-
-    // pixel data  
-    cpu.pixels[0] = true; 
-    cpu.pixels[1] = true; 
-    cpu.pixels[2] = true; 
-    cpu.pixels[65] = true; 
-    cpu.pixels[129] = true; 
+    let mut key_pressed_this_frame: Option<Keycode> = None; 
+    let mut frame_counter: usize = 0;
+    let max_framerate: usize = 30;
+    let keyboard_to_chip8_input_map = build_keycode_hashmap(); 
 
     // enter main game loop 
     'running: loop {
@@ -81,7 +108,9 @@ fn execute(mut cpu: CPU) -> Result<(), String> {
                         | Keycode::X
                         | Keycode::C 
                         | Keycode::V 
-                        => { println!("pressed {}", key)}, 
+                        => {
+                            key_pressed_this_frame = Some(key); 
+                        }, 
 
                         Keycode::Escape => break 'running, 
                         _ => {}, 
@@ -100,9 +129,13 @@ fn execute(mut cpu: CPU) -> Result<(), String> {
         }
 
         // update the game at set framerate
-        if frame >= 30 {
-            frame = 0;
-            cpu.step(); 
+        if frame_counter >= max_framerate {
+            match key_pressed_this_frame { 
+                Some(key) => cpu.step( keyboard_to_chip8_input_map.get(&key)), 
+                None => cpu.step(None)
+            };
+            frame_counter = 0;
+            key_pressed_this_frame = None;
         }
 
         // draw pixels on canvas
