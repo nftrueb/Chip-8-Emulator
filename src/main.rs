@@ -6,13 +6,12 @@ extern crate sdl2;
 
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode as SdlKeycode;
-use sdl2::mouse::MouseButton;
 use sdl2::pixels::Color;
 use sdl2::rect::Rect;
 use sdl2::render::Canvas;
 use sdl2::video::Window; 
 
-use std::collections::HashMap; 
+use std::collections::HashMap;
  
 const PIXEL_WIDTH  : usize = 10; 
 const CANVAS_WIDTH : usize = SCREEN_WIDTH * PIXEL_WIDTH; 
@@ -20,7 +19,6 @@ const CANVAS_HEIGHT: usize = SCREEN_HEIGHT * PIXEL_WIDTH;
 
 #[derive(PartialEq)]
 enum GameState { 
-    Restart, 
     Running, 
     Paused,
 }
@@ -86,7 +84,7 @@ fn execute(mut cpu: CPU) -> Result<(), String> {
     let mut frame_counter: usize = 0;
     let max_framerate: usize = 30;
     let keyboard_to_chip8_input_map: HashMap<SdlKeycode, Chip8Input> = build_keycode_hashmap(); 
-    let mut state: GameState = GameState::Restart; 
+    let mut state: GameState = GameState::Paused; 
 
     // enter main game loop 
     'running: loop {
@@ -119,22 +117,24 @@ fn execute(mut cpu: CPU) -> Result<(), String> {
                         => {
                             key_pressed_this_frame = Some(key); 
                         }, 
-                        SdlKeycode::Escape => break 'running, 
-                        SdlKeycode::Space => if state == GameState::Restart { cpu.reset() }
+                        SdlKeycode::Escape => {
+                            state = GameState::Paused ;
+                            cpu.reset(); 
+                        }, 
+                        SdlKeycode::Space => {
+                            state = match state {  
+                                GameState::Paused  => GameState::Running, 
+                                GameState::Running => GameState::Paused
+                            }
+                        },
                         _ => {}, 
                     }
                 },
-                Event::MouseButtonDown {
-                    x,
-                    y,
-                    mouse_btn: MouseButton::Left,
-                    ..
-                } => { 
-                    println!("mouse clicked at ({},{})", x, y);
-                }
                 _ => {}
             }
         }
+
+        if state == GameState::Paused { continue; }
 
         // update the game at set framerate
         if frame_counter >= max_framerate {
@@ -176,6 +176,7 @@ pub fn main() -> Result<(), String> {
 
     // instantiate cpu
     let mut cpu: CPU = CPU::new();  
+    cpu.load_rom(Vec::from([])); 
 
     // run cpu
     execute(cpu)
