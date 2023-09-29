@@ -5,7 +5,7 @@ pub use cpu::cpu::{CPU, SCREEN_WIDTH, SCREEN_HEIGHT, Chip8Input};
 extern crate sdl2;
 
 use sdl2::event::Event;
-use sdl2::keyboard::Keycode;
+use sdl2::keyboard::Keycode as SdlKeycode;
 use sdl2::mouse::MouseButton;
 use sdl2::pixels::Color;
 use sdl2::rect::Rect;
@@ -18,32 +18,39 @@ const PIXEL_WIDTH  : usize = 10;
 const CANVAS_WIDTH : usize = SCREEN_WIDTH * PIXEL_WIDTH; 
 const CANVAS_HEIGHT: usize = SCREEN_HEIGHT * PIXEL_WIDTH; 
 
+#[derive(PartialEq)]
+enum GameState { 
+    Restart, 
+    Running, 
+    Paused,
+}
+
 // maps Keycode value (from sdl2) to Chip8Input value (0-F) to simulate controller input 
-fn build_keycode_hashmap() -> HashMap<Keycode, Chip8Input>{ 
+fn build_keycode_hashmap() -> HashMap<SdlKeycode, Chip8Input>{ 
     HashMap::from([
         // ROW 1
-        (Keycode::Num1, Chip8Input::Num1), 
-        (Keycode::Num2, Chip8Input::Num2), 
-        (Keycode::Num3, Chip8Input::Num3), 
-        (Keycode::Num4, Chip8Input::C),
+        (SdlKeycode::Num1, Chip8Input::Num1), 
+        (SdlKeycode::Num2, Chip8Input::Num2), 
+        (SdlKeycode::Num3, Chip8Input::Num3), 
+        (SdlKeycode::Num4, Chip8Input::C),
     
         // ROW 2
-        (Keycode::Q, Chip8Input::Num4), 
-        (Keycode::W, Chip8Input::Num5), 
-        (Keycode::E, Chip8Input::Num6), 
-        (Keycode::R, Chip8Input::D), 
+        (SdlKeycode::Q, Chip8Input::Num4), 
+        (SdlKeycode::W, Chip8Input::Num5), 
+        (SdlKeycode::E, Chip8Input::Num6), 
+        (SdlKeycode::R, Chip8Input::D), 
     
         // ROW 3
-        (Keycode::A, Chip8Input::Num7), 
-        (Keycode::S, Chip8Input::Num8), 
-        (Keycode::D, Chip8Input::Num9), 
-        (Keycode::F, Chip8Input::E),
+        (SdlKeycode::A, Chip8Input::Num7), 
+        (SdlKeycode::S, Chip8Input::Num8), 
+        (SdlKeycode::D, Chip8Input::Num9), 
+        (SdlKeycode::F, Chip8Input::E),
     
         // ROW 4 
-        (Keycode::Z, Chip8Input::A), 
-        (Keycode::X, Chip8Input::Num0), 
-        (Keycode::C, Chip8Input::B), 
-        (Keycode::V, Chip8Input::F),
+        (SdlKeycode::Z, Chip8Input::A), 
+        (SdlKeycode::X, Chip8Input::Num0), 
+        (SdlKeycode::C, Chip8Input::B), 
+        (SdlKeycode::V, Chip8Input::F),
     ])
 }
 
@@ -75,10 +82,11 @@ fn execute(mut cpu: CPU) -> Result<(), String> {
 
     // define event_pump and frame counter for event polling and framerate control respectively
     let mut event_pump = sdl_context.event_pump()?;
-    let mut key_pressed_this_frame: Option<Keycode> = None; 
+    let mut key_pressed_this_frame: Option<SdlKeycode> = None; 
     let mut frame_counter: usize = 0;
     let max_framerate: usize = 30;
-    let keyboard_to_chip8_input_map = build_keycode_hashmap(); 
+    let keyboard_to_chip8_input_map: HashMap<SdlKeycode, Chip8Input> = build_keycode_hashmap(); 
+    let mut state: GameState = GameState::Restart; 
 
     // enter main game loop 
     'running: loop {
@@ -92,27 +100,27 @@ fn execute(mut cpu: CPU) -> Result<(), String> {
                     ..
                 } => {
                     match key { 
-                        Keycode::Num1 
-                        | Keycode::Num2
-                        | Keycode::Num3 
-                        | Keycode::Num4
-                        | Keycode::Q 
-                        | Keycode::W
-                        | Keycode::E 
-                        | Keycode::R
-                        | Keycode::A
-                        | Keycode::S 
-                        | Keycode::D 
-                        | Keycode::F
-                        | Keycode::Z 
-                        | Keycode::X
-                        | Keycode::C 
-                        | Keycode::V 
+                        SdlKeycode::Num1 
+                        | SdlKeycode::Num2
+                        | SdlKeycode::Num3 
+                        | SdlKeycode::Num4
+                        | SdlKeycode::Q 
+                        | SdlKeycode::W
+                        | SdlKeycode::E 
+                        | SdlKeycode::R
+                        | SdlKeycode::A
+                        | SdlKeycode::S 
+                        | SdlKeycode::D 
+                        | SdlKeycode::F
+                        | SdlKeycode::Z 
+                        | SdlKeycode::X
+                        | SdlKeycode::C 
+                        | SdlKeycode::V 
                         => {
                             key_pressed_this_frame = Some(key); 
                         }, 
-
-                        Keycode::Escape => break 'running, 
+                        SdlKeycode::Escape => break 'running, 
+                        SdlKeycode::Space => if state == GameState::Restart { cpu.reset() }
                         _ => {}, 
                     }
                 },
@@ -136,6 +144,8 @@ fn execute(mut cpu: CPU) -> Result<(), String> {
             };
             frame_counter = 0;
             key_pressed_this_frame = None;
+        } else { 
+            frame_counter += 1; 
         }
 
         // draw pixels on canvas
@@ -151,7 +161,7 @@ fn execute(mut cpu: CPU) -> Result<(), String> {
             };
               
             canvas.set_draw_color(color);
-            canvas.fill_rect(rect).expect("");
+            canvas.fill_rect(rect).expect("rect not filled correctly when drawing screen!!");
         }
 
         canvas.present();
