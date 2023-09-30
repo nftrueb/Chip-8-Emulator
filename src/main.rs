@@ -1,6 +1,6 @@
 
 mod cpu; 
-pub use cpu::cpu::{CPU, SCREEN_WIDTH, SCREEN_HEIGHT, Chip8Input}; 
+pub use cpu::cpu::{CPU, SCREEN_WIDTH, SCREEN_HEIGHT, Chip8Input, get_chip8_key_idx}; 
 
 extern crate sdl2;
 
@@ -80,7 +80,6 @@ fn execute(mut cpu: CPU) -> Result<(), String> {
 
     // define event_pump and frame counter for event polling and framerate control respectively
     let mut event_pump = sdl_context.event_pump()?;
-    let mut key_pressed_this_frame: Option<SdlKeycode> = None; 
     let mut frame_counter: usize = 0;
     let max_framerate: usize = 30;
     let keyboard_to_chip8_input_map: HashMap<SdlKeycode, Chip8Input> = build_keycode_hashmap(); 
@@ -98,25 +97,6 @@ fn execute(mut cpu: CPU) -> Result<(), String> {
                     ..
                 } => {
                     match key { 
-                        SdlKeycode::Num1 
-                        | SdlKeycode::Num2
-                        | SdlKeycode::Num3 
-                        | SdlKeycode::Num4
-                        | SdlKeycode::Q 
-                        | SdlKeycode::W
-                        | SdlKeycode::E 
-                        | SdlKeycode::R
-                        | SdlKeycode::A
-                        | SdlKeycode::S 
-                        | SdlKeycode::D 
-                        | SdlKeycode::F
-                        | SdlKeycode::Z 
-                        | SdlKeycode::X
-                        | SdlKeycode::C 
-                        | SdlKeycode::V 
-                        => {
-                            key_pressed_this_frame = Some(key); 
-                        }, 
                         SdlKeycode::Escape => {
                             state = GameState::Paused ;
                             cpu.reset(); 
@@ -136,14 +116,20 @@ fn execute(mut cpu: CPU) -> Result<(), String> {
 
         if state == GameState::Paused { continue; }
 
+        let pressed_keys: Vec<usize> = event_pump.keyboard_state()
+                                                    .pressed_scancodes()
+                                                    .filter_map(SdlKeycode::from_scancode)
+                                                    .map(|keycode| keyboard_to_chip8_input_map.get(&keycode))
+                                                    .filter(|keycode| *keycode != None)
+                                                    .map(|keycode| keycode.unwrap())
+                                                    .map(|key| get_chip8_key_idx(key))
+                                                    .collect(); 
+
+
         // update the game at set framerate
         if frame_counter >= max_framerate {
-            match key_pressed_this_frame { 
-                Some(key) => cpu.step( keyboard_to_chip8_input_map.get(&key)), 
-                None => cpu.step(None)
-            };
+            cpu.step(pressed_keys);
             frame_counter = 0;
-            key_pressed_this_frame = None;
         } else { 
             frame_counter += 1; 
         }
