@@ -12,6 +12,7 @@ use sdl2::render::Canvas;
 use sdl2::video::Window; 
 
 use std::collections::HashMap;
+use std::time::Duration;
  
 const PIXEL_WIDTH  : usize = 10; 
 const CANVAS_WIDTH : usize = SCREEN_WIDTH * PIXEL_WIDTH; 
@@ -80,8 +81,8 @@ fn execute(mut cpu: CPU) -> Result<(), String> {
 
     // define event_pump and frame counter for event polling and framerate control respectively
     let mut event_pump = sdl_context.event_pump()?;
-    let mut frame_counter: usize = 0;
-    let max_framerate: usize = 30;
+    // let mut frame_counter: usize = 0;
+    let max_framerate: usize = 60;
     let keyboard_to_chip8_input_map: HashMap<SdlKeycode, Chip8Input> = build_keycode_hashmap(); 
     let mut state: GameState = GameState::Paused; 
 
@@ -127,12 +128,7 @@ fn execute(mut cpu: CPU) -> Result<(), String> {
 
 
         // update the game at set framerate
-        if frame_counter >= max_framerate {
-            cpu.step(pressed_keys);
-            frame_counter = 0;
-        } else { 
-            frame_counter += 1; 
-        }
+        cpu.step(pressed_keys);
 
         // draw pixels on canvas
         for (idx, pixel) in (&cpu.pixels).into_iter().enumerate() { 
@@ -151,6 +147,7 @@ fn execute(mut cpu: CPU) -> Result<(), String> {
         }
 
         canvas.present();
+        std::thread::sleep(Duration::from_millis(16))
     }
 
     Ok(())

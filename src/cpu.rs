@@ -11,9 +11,49 @@ pub mod cpu {
     const MAX_STACK_SIZE: usize = 12;
     const ROM_START_ADDR: usize = 0x200; 
 
-    // -------------------------
-    // ---- STRUCTS / ENUMS ----
-    // -------------------------
+    const FONT_HEIGHT: usize = 5; 
+    const FONT_START: usize = 0x0000; 
+    const FONT_SPRITE_START_ADDRS: [usize; 16] = [
+        FONT_START,                     // FONT_0
+        FONT_START + FONT_HEIGHT * 0x1, // FONT_1
+        FONT_START + FONT_HEIGHT * 0x2, // FONT_2
+        FONT_START + FONT_HEIGHT * 0x3, // FONT_3
+        FONT_START + FONT_HEIGHT * 0x4, // FONT_4
+        FONT_START + FONT_HEIGHT * 0x5, // FONT_5
+        FONT_START + FONT_HEIGHT * 0x6, // FONT_6
+        FONT_START + FONT_HEIGHT * 0x7, // FONT_7
+        FONT_START + FONT_HEIGHT * 0x8, // FONT_8
+        FONT_START + FONT_HEIGHT * 0x9, // FONT_9
+        FONT_START + FONT_HEIGHT * 0xA, // FONT_A
+        FONT_START + FONT_HEIGHT * 0xB, // FONT_B
+        FONT_START + FONT_HEIGHT * 0xC, // FONT_C
+        FONT_START + FONT_HEIGHT * 0xD, // FONT_D
+        FONT_START + FONT_HEIGHT * 0xE, // FONT_E
+        FONT_START + FONT_HEIGHT * 0xF, // FONT_F
+    ]; 
+
+    const FONT_DATAS: [[u8; FONT_HEIGHT]; 16] = [ 
+        [0xF0, 0x90, 0x90, 0x90, 0xF0], // FONT_0
+        [0x20, 0x60, 0x20, 0x20, 0x70], // FONT_1
+        [0xF0, 0x10, 0xF0, 0x80, 0xF0], // FONT_2
+        [0xF0, 0x10, 0xF0, 0x10, 0xF0], // FONT_3
+        [0x90, 0x90, 0xF0, 0x10, 0x10], // FONT_4
+        [0xF0, 0x80, 0xF0, 0x10, 0xF0], // FONT_5
+        [0xF0, 0x80, 0xF0, 0x90, 0xF0], // FONT_6
+        [0xF0, 0x10, 0x20, 0x40, 0x40], // FONT_7
+        [0xF0, 0x90, 0xF0, 0x90, 0xF0], // FONT_8
+        [0xF0, 0x90, 0xF0, 0x10, 0xF0], // FONT_9
+        [0xF0, 0x90, 0xF0, 0x90, 0x90], // FONT_A
+        [0xE0, 0x90, 0xE0, 0x90, 0xE0], // FONT_B
+        [0xF0, 0x80, 0x80, 0x80, 0xF0], // FONT_C
+        [0xE0, 0x90, 0x90, 0x90, 0xE0], // FONT_D
+        [0xF0, 0x80, 0xF0, 0x80, 0xF0], // FONT_E
+        [0xF0, 0x80, 0xF0, 0x80, 0x80], // FONT_F
+    ];
+
+    // -------------------------------------
+    // ---- STRUCTS / ENUMS / HELPER FN ----
+    // -------------------------------------
 
     #[derive(PartialEq, Eq, Hash)]
     pub enum Chip8Input { 
@@ -56,14 +96,24 @@ pub mod cpu {
         }
     }
 
+    fn get_fresh_memory_with_font_data() -> [u8; 0x1000] { 
+        let mut memory: [u8; 0x1000] = [0; 0x1000];
+        for i in 0..0xF { 
+            for j in 0..FONT_HEIGHT { 
+                memory[FONT_SPRITE_START_ADDRS[i]+j] = FONT_DATAS[i][j];
+            }
+        }
+        memory
+    }
+
     pub struct CPU { 
         pub pixels: [bool; SCREEN_WIDTH * SCREEN_HEIGHT], 
         pub memory: [u8; 0x1000], 
         pub registers: [u8; 0xF], 
         reg_i: usize, 
         pub stack: [usize; MAX_STACK_SIZE], 
-        _delay_timer: usize, 
-        _sound_timer: usize,
+        delay_timer: u8, 
+        pub sound_timer: u8,
         pub pc: usize, // PROGRAM COUNTER
         pub sp: usize, // STACK POINTER
     }
@@ -71,21 +121,35 @@ pub mod cpu {
     impl CPU { 
 
         pub fn new() -> Self { 
+            let memory: [u8; 0x1000] = get_fresh_memory_with_font_data(); 
             CPU { 
                 pixels: [false; SCREEN_WIDTH * SCREEN_HEIGHT],
-                memory: [0; 0x1000], 
+                memory, 
                 registers: [0; 0xF], 
                 reg_i: 0, 
                 stack: [0; MAX_STACK_SIZE], 
-                _delay_timer: 0, 
-                _sound_timer: 0, 
+                delay_timer: 0, 
+                sound_timer: 0, 
                 pc: 0, 
                 sp: 0,
             }
         }
 
-        pub fn reset(&mut self) { 
-
+        pub fn reset(&mut self) {
+            for idx in 0..self.pixels.len() { 
+                self.pixels[idx] = false; 
+            } 
+            for idx in 0..self.registers.len() { 
+                self.registers[idx] = 0x00; 
+            }
+            for idx in 0..MAX_STACK_SIZE { 
+                self.stack[idx] = 0x0000; 
+            }
+            self.reg_i = 0x0000; 
+            self.delay_timer = 0; 
+            self.sound_timer = 0; 
+            self.pc = 0x0200; 
+            self.sp = 0;
         }
 
         pub fn load_rom(&mut self, rom: Vec<u8>) { 
@@ -102,6 +166,10 @@ pub mod cpu {
         }
 
         pub fn step(&mut self, pressed_keys: Vec<usize>) { 
+
+            // decrement timers
+            if self.delay_timer > 0 { self.delay_timer -= 1; }
+            if self.sound_timer > 0 { self.sound_timer -= 1; }
 
             // get next instruction 
             let instruction: usize = ((self.memory[self.pc] as usize) << 8) + self.memory[self.pc+1] as usize; 
@@ -151,15 +219,15 @@ pub mod cpu {
                 },
                 0xF000 => {
                     match instruction & 0x00FF { 
-                        0x0007 => self.opcode_1nnn(instruction),
+                        0x0007 => self.opcode_fx07(instruction),
                         0x000A => pc_inc = self.opcode_fx0a(instruction, pressed_keys),
-                        0x0015 => self.opcode_1nnn(instruction),
-                        0x0018 => self.opcode_1nnn(instruction),
-                        0x001E => self.opcode_1nnn(instruction),
-                        0x0029 => self.opcode_1nnn(instruction),
-                        0x0033 => self.opcode_1nnn(instruction),
-                        0x0055 => self.opcode_1nnn(instruction),
-                        0x0065 => self.opcode_1nnn(instruction),
+                        0x0015 => self.opcode_fx15(instruction),
+                        0x0018 => self.opcode_fx18(instruction),
+                        0x001E => self.opcode_fx1e(instruction),
+                        0x0029 => self.opcode_fx29(instruction),
+                        0x0033 => self.opcode_fx33(instruction),
+                        0x0055 => self.opcode_fx55(instruction),
+                        0x0065 => self.opcode_fx65(instruction),
                         _ => panic!("invalid opcode found! 0x{:X}", instruction)
                     }
                 },
@@ -197,7 +265,6 @@ pub mod cpu {
             if self.sp >= MAX_STACK_SIZE { 
                 panic!("Stack is too full to push new return addresses"); 
             }
-
             self.stack[self.sp] = self.pc; 
             self.sp += 1; 
             self.pc = instruction & 0xFFF; 
@@ -374,6 +441,68 @@ pub mod cpu {
             let x: usize = (instruction & 0x0F00) >> 8; 
             self.registers[x] = pressed_keys[0] as u8;
             true 
+        }
+
+        // Vx = delay_timer
+        fn opcode_fx07(&mut self, instruction: usize) {
+            let x: usize = (instruction & 0x0F00) >> 8; 
+            self.registers[x] = self.delay_timer;
+        }
+
+        // delay_timer = Vx
+        fn opcode_fx15(&mut self, instruction: usize) {
+            let x: usize = (instruction & 0x0F00) >> 8; 
+            self.delay_timer = self.registers[x];
+        }
+
+        // sound_timer = Vx
+        fn opcode_fx18(&mut self, instruction: usize) {
+            let x: usize = (instruction & 0x0F00) >> 8; 
+            self.sound_timer = self.registers[x];
+        }
+
+        // TODO: check overflow
+        // I += Vx
+        fn opcode_fx1e(&mut self, instruction: usize) {
+            let x: usize = (instruction & 0x0F00) >> 8; 
+            self.reg_i += self.registers[x] as usize;
+        }
+
+        // I = char_sprite_addr[Vx]
+        fn opcode_fx29(&mut self, instruction: usize) {
+            let x: usize = (instruction & 0x0F00) >> 8; 
+            let vx: usize = (self.registers[x] & 0xF) as usize; 
+            self.reg_i = FONT_SPRITE_START_ADDRS[vx]; 
+        }
+
+        // BCD of Vx stored in I -> if Vx 123 then I = 1, I+1 = 2, I+2 = 3
+        fn opcode_fx33(&mut self, instruction: usize) {
+            let x: usize = (instruction & 0x0F00) >> 8; 
+            let mut vx: u8 = self.registers[x] & 0xF; 
+            
+            self.memory[self.reg_i+2] = vx % 10;
+            vx /= 10; 
+
+            self.memory[self.reg_i+1] = vx % 10;
+            vx /= 10; 
+
+            self.memory[self.reg_i] = vx % 10; 
+        }
+
+        // LD [I], Vx -> store V0-Vx in memory starting at I
+        fn opcode_fx55(&mut self, instruction: usize) {
+            let x: usize = (instruction & 0x0F00) >> 8; 
+            for i in 0..x { 
+                self.memory[self.reg_i+i] = self.registers[i]; 
+            }
+        }
+
+        // LD Vx, [I] -> load V0-Vx with memory starting at I
+        fn opcode_fx65(&mut self, instruction: usize) {
+            let x: usize = (instruction & 0x0F00) >> 8; 
+            for i in 0..x { 
+                self.registers[i] = self.memory[self.reg_i+i]; 
+            }
         }
 
     }
