@@ -116,6 +116,7 @@ pub mod cpu {
         pub sound_timer: u8,
         pub pc: usize, // PROGRAM COUNTER
         pub sp: usize, // STACK POINTER
+        rom_len: usize, 
     }
 
     impl CPU { 
@@ -132,6 +133,7 @@ pub mod cpu {
                 sound_timer: 0, 
                 pc: 0, 
                 sp: 0,
+                rom_len: 0, 
             }
         }
 
@@ -148,14 +150,35 @@ pub mod cpu {
             self.reg_i = 0x0000; 
             self.delay_timer = 0; 
             self.sound_timer = 0; 
-            self.pc = 0x0200; 
+            self.pc = ROM_START_ADDR; 
             self.sp = 0;
         }
 
         pub fn load_rom(&mut self, rom: Vec<u8>) { 
+            self.rom_len = rom.len(); 
             for i in 0..rom.len() { 
                 self.memory[ROM_START_ADDR+i] = rom[i]; 
             }
+        }
+
+        pub fn dump_rom(self) -> String { 
+            let mut memory_dump: String = String::from("---- MEMORY ----"); 
+            for (idx, byte) in self.memory.iter().enumerate() { 
+                if idx < ROM_START_ADDR { continue; }
+                if idx > ROM_START_ADDR + self.rom_len { break; }
+
+                let new_byte = if idx % 16 == 0 { 
+                    format!("\n{:#06x} :: {:02x}", idx, byte)
+                } else if idx % 2 == 0 { 
+                    format!("{:02x}", byte)
+                } else { 
+                    format!("{:02x} ", byte)
+                };
+
+                memory_dump.push_str(new_byte.as_str()); 
+            }
+            memory_dump.push_str("\n");
+            memory_dump 
         }
 
         fn parse_pressed_keys(target: usize, pressed_keys: Vec<usize>) -> bool { 
@@ -165,7 +188,7 @@ pub mod cpu {
             false
         }
 
-        pub fn step(&mut self, pressed_keys: Vec<usize>) { 
+        pub fn step(&mut self, pressed_keys: Vec<usize>) -> (bool, String) { 
 
             // decrement timers
             if self.delay_timer > 0 { self.delay_timer -= 1; }
@@ -174,6 +197,7 @@ pub mod cpu {
             // get next instruction 
             let instruction: usize = ((self.memory[self.pc] as usize) << 8) + self.memory[self.pc+1] as usize; 
             let mut pc_inc: bool = true;
+            let mut should_render_screen: bool = false; 
 
             // execute instruction 
             match instruction & 0xF000 { 
@@ -209,7 +233,10 @@ pub mod cpu {
                 0xA000 => self.opcode_annn(instruction), 
                 0xB000 => self.opcode_bnnn(instruction), 
                 0xC000 => self.opcode_cxnn(instruction), 
-                0xD000 => self.opcode_dxyn(instruction), 
+                0xD000 => {
+                    self.opcode_dxyn(instruction);
+                    should_render_screen = true; 
+                }, 
                 0xE000 => {
                     match instruction & 0x00FF { 
                         0x009E => self.opcode_ex9e(instruction, pressed_keys),
@@ -235,7 +262,8 @@ pub mod cpu {
             }
 
             // increment pc 
-            self.pc += if pc_inc { 2 } else { 0 }
+            self.pc += if pc_inc { 2 } else { 0 }; 
+            (should_render_screen, format!("{:04x}", instruction))
         }
 
         // ------------------------
