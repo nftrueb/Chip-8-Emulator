@@ -109,8 +109,8 @@ pub mod cpu {
     pub struct CPU { 
         pub pixels: [bool; SCREEN_WIDTH * SCREEN_HEIGHT], 
         pub memory: [u8; 0x1000], 
-        pub registers: [u8; 0xF], 
-        reg_i: usize, 
+        pub registers: [u8; 16], 
+        pub reg_i: usize, 
         pub stack: [usize; MAX_STACK_SIZE], 
         delay_timer: u8, 
         pub sound_timer: u8,
@@ -126,12 +126,12 @@ pub mod cpu {
             CPU { 
                 pixels: [false; SCREEN_WIDTH * SCREEN_HEIGHT],
                 memory, 
-                registers: [0; 0xF], 
+                registers: [0; 16], 
                 reg_i: 0, 
                 stack: [0; MAX_STACK_SIZE], 
                 delay_timer: 0, 
                 sound_timer: 0, 
-                pc: 0, 
+                pc: ROM_START_ADDR, 
                 sp: 0,
                 rom_len: 0, 
             }
@@ -161,8 +161,8 @@ pub mod cpu {
             }
         }
 
-        pub fn dump_rom(self) -> String { 
-            let mut memory_dump: String = String::from("---- MEMORY ----"); 
+        pub fn dump_memory(&self) -> String { 
+            let mut memory_dump: String = String::from("---- CHIP-8 MEMORY ----"); 
             for (idx, byte) in self.memory.iter().enumerate() { 
                 if idx < ROM_START_ADDR { continue; }
                 if idx > ROM_START_ADDR + self.rom_len { break; }
@@ -188,7 +188,7 @@ pub mod cpu {
             false
         }
 
-        pub fn step(&mut self, pressed_keys: Vec<usize>) -> (bool, String) { 
+        pub fn step(&mut self, pressed_keys: Vec<usize>) -> (bool, String, String) { 
 
             // decrement timers
             if self.delay_timer > 0 { self.delay_timer -= 1; }
@@ -208,7 +208,10 @@ pub mod cpu {
                         _ => panic!("invalid opcode found! 0x{:X}", instruction)
                     }
                 }, 
-                0x1000 => self.opcode_1nnn(instruction), 
+                0x1000 => { 
+                    pc_inc = false; 
+                    self.opcode_1nnn(instruction)
+                }, 
                 0x2000 => self.opcode_2nnn(instruction), 
                 0x3000 => self.opcode_3xnn(instruction), 
                 0x4000 => self.opcode_4xnn(instruction), 
@@ -262,8 +265,13 @@ pub mod cpu {
             }
 
             // increment pc 
+            let old_pc: usize = self.pc; 
             self.pc += if pc_inc { 2 } else { 0 }; 
-            (should_render_screen, format!("{:04x}", instruction))
+
+            return (should_render_screen, 
+                format!("{:#04x}", old_pc), 
+                format!("{:04x}", instruction)
+            ); 
         }
 
         // ------------------------

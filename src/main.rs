@@ -6,13 +6,13 @@ extern crate sdl2;
 
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode as SdlKeycode;
-use sdl2::libc::EAI_MEMORY;
 use sdl2::pixels::Color;
 use sdl2::rect::Rect;
 use sdl2::render::Canvas;
 use sdl2::video::Window; 
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::time::Instant;
 use std::env; 
 use std::fs;
@@ -23,10 +23,16 @@ const PIXEL_WIDTH  : usize = 10;
 const CANVAS_WIDTH : usize = SCREEN_WIDTH * PIXEL_WIDTH; 
 const CANVAS_HEIGHT: usize = SCREEN_HEIGHT * PIXEL_WIDTH; 
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug)]
 enum GameState { 
     Running, 
     Paused,
+}
+
+#[derive(Eq, PartialEq, Hash, Debug)]
+enum OptionalModes { 
+    DebugMessages, 
+    ManualStepping
 }
 
 // maps Keycode value (from sdl2) to Chip8Input value (0-F) to simulate controller input 
@@ -58,7 +64,7 @@ fn build_keycode_hashmap() -> HashMap<SdlKeycode, Chip8Input>{
     ])
 }
 
-fn execute(mut cpu: CPU) -> Result<(), String> { 
+fn execute(mut cpu: CPU, modes: HashSet<OptionalModes>) -> Result<(), String> { 
 
     // get os specific window info
     let sdl_context = sdl2::init()?;
@@ -87,6 +93,7 @@ fn execute(mut cpu: CPU) -> Result<(), String> {
     let mut event_pump = sdl_context.event_pump()?;
     let mut state: GameState = GameState::Paused;
     let mut should_render_screen: bool = true; 
+    let mut manual_step_signal: bool = false; 
     let mut prev_cpu_cycle_time: Instant = Instant::now(); 
     let mut prev_screen_refresh_time: Instant = Instant::now();
     let cpu_cycle_freq: u128 = 500;  
@@ -103,18 +110,35 @@ fn execute(mut cpu: CPU) -> Result<(), String> {
                 Event::KeyUp {
                     keycode: Some(key),
                     ..
-                } => {
-                    match key { 
+                } => { 
+                    match key {
                         SdlKeycode::Escape => {
-                            state = GameState::Paused ;
+                            state = GameState::Paused;
                             cpu.reset(); 
+                            canvas.set_draw_color(Color::BLACK);
+                            canvas.clear();
+                            canvas.present(); 
+                            if modes.contains(&OptionalModes::DebugMessages) { 
+                                println!("Resetting and pausing cpu ..."); 
+                            }
                         }, 
                         SdlKeycode::Space => {
                             state = match state {  
                                 GameState::Paused  => GameState::Running, 
                                 GameState::Running => GameState::Paused
+                            }; 
+                            if modes.contains(&OptionalModes::DebugMessages) { 
+                                println!("Toggling game state to {:?}", state);  
                             }
                         },
+                        SdlKeycode::Return => {
+                            if modes.contains(&OptionalModes::ManualStepping) {
+                                manual_step_signal = true; 
+                            }
+                            if modes.contains(&OptionalModes::DebugMessages) { 
+                                println!("Stepping now ..."); 
+                            }
+                        }, 
                         _ => {}, 
                     }
                 },
@@ -129,21 +153,34 @@ fn execute(mut cpu: CPU) -> Result<(), String> {
         if prev_cpu_cycle_time.elapsed().as_millis() >= 1_000 / cpu_cycle_freq { 
             prev_cpu_cycle_time = Instant::now(); 
 
-            // get vector of pressed keys to be matched in cpu
-            let pressed_keys: Vec<usize> = event_pump.keyboard_state()
-                                                        .pressed_scancodes()
-                                                        .filter_map(SdlKeycode::from_scancode)
-                                                        .map(|keycode| keyboard_to_chip8_input_map.get(&keycode))
-                                                        .filter(|keycode| *keycode != None)
-                                                        .map(|keycode| keycode.unwrap())
-                                                        .map(|key| get_chip8_key_idx(key))
-                                                        .collect(); 
-            should_render_screen = if should_render_screen { 
-                true 
-            } else { 
-                let (render_bool, instruction_string) = cpu.step(pressed_keys); 
-                render_bool
-            };
+            // do not update if manual stepping is enabled and signal has not been sent
+            if !modes.contains(&OptionalModes::ManualStepping) || 
+                (modes.contains(&OptionalModes::ManualStepping) && manual_step_signal) {
+                manual_step_signal = false; 
+
+                // get vector of pressed keys to be matched in cpu
+                let pressed_keys: Vec<usize> = event_pump.keyboard_state()
+                                                            .pressed_scancodes()
+                                                            .filter_map(SdlKeycode::from_scancode)
+                                                            .map(|keycode| keyboard_to_chip8_input_map.get(&keycode))
+                                                            .filter(|keycode| *keycode != None)
+                                                            .map(|keycode| keycode.unwrap())
+                                                            .map(|key| get_chip8_key_idx(key))
+                                                            .collect(); 
+                let (needs_rendering, pc, instruction_string) = cpu.step(pressed_keys);
+                if !should_render_screen { should_render_screen = needs_rendering };
+
+                // print debug info after executing instruction
+                if modes.contains(&OptionalModes::DebugMessages) { 
+                    println!("PC: {}  |  Instruction: {}", pc, instruction_string);
+                    println!("I: {:#04x}", cpu.reg_i); 
+                    for (idx, reg) in cpu.registers.iter().enumerate() { 
+                        if idx % 4 == 0 && idx != 0 { print!("\n"); }
+                        print!("{:#04x} ", reg); 
+                    }
+                    print!("\n");
+                }  
+            }
         }
 
         // draw pixels on canvas at specified screen refresh frequency
@@ -173,14 +210,17 @@ fn execute(mut cpu: CPU) -> Result<(), String> {
     Ok(())
 }
 
-fn parse_command_line_args() -> Result<String, String> { 
+fn parse_command_line_args() -> Result<(String, HashSet<OptionalModes>), String> { 
+
+    // check minimum length of args
     let argv: Vec<String> = env::args().collect(); 
     let argc: usize = argv.len(); 
-    if argc != 2 { 
+    if argc < 2 { 
         return Err(String::from("Arguments of incorrect length provided"));
     }
 
-    let filename: &String = &argv[1]; 
+    // last arg which should be the filename position
+    let filename: &String = &argv[argc-1]; 
     if filename.len() < 4 { 
         return Err(String::from("Argument too short to contain .ch8")); 
     }
@@ -188,18 +228,34 @@ fn parse_command_line_args() -> Result<String, String> {
         return Err(String::from("Argument does not contain .ch8 extension")); 
     }
 
-    Ok(filename.to_owned())
+    // parse possible flags before filename
+    let mut optional_modes: HashSet<OptionalModes> = HashSet::new();  
+
+    if argc == 2 { return Ok((filename.to_owned(), optional_modes)); }
+
+    for i in 1..argc-1 { 
+        let mode: OptionalModes = match argv[i].as_str() { 
+            "-d" => OptionalModes::DebugMessages, 
+            "-s" => OptionalModes::ManualStepping, 
+            _ => return Err(format!("Unknown flag: {}", argv[i]))
+        }; 
+        optional_modes.insert(mode); 
+    }
+
+    // return filename and parsed modes
+    Ok((filename.to_owned(), optional_modes))
 }
 
 fn print_usage(error_message: String) { 
-    println!("ERROR: {}", error_message); 
+    println!("  ERROR: {}", error_message); 
     print!(
-"USAGE:: ./chip8 {{filename}}.ch8
+"  USAGE:: ./chip8 [-d | -s] {{filename}}.ch8
 
    DESCRIPTION: This is a Chip-8 interpreter built in rust 
 
-   FLAGS: 
+   OPTIONS: 
      -d -> turns on debugging information about current instructions and memory
+     -s -> turns on manual stepping
 "
     ); 
 }
@@ -207,8 +263,8 @@ fn print_usage(error_message: String) {
 pub fn main() {
 
     // parse input file name
-    let filename = match parse_command_line_args() {
-        Ok(value) => value, 
+    let (filename, modes)= match parse_command_line_args() {
+        Ok((filename_, modes_)) => (filename_, modes_), 
         Err(message) => { 
             print_usage(message); 
             std::process::exit(1); 
@@ -231,17 +287,17 @@ pub fn main() {
     let mut cpu: CPU = CPU::new();  
     cpu.load_rom(rom_bytes);
 
-    let memory_dump: String = cpu.dump_rom();
-    println!("{}", memory_dump);   
-
-    std::process::exit(1); 
+    if modes.contains(&OptionalModes::DebugMessages) { 
+        println!("{}", cpu.dump_memory()); 
+        println!("Starting CPU with the following modes: {:?}", modes); 
+    }  
 
     // run cpu
-    let result = execute(cpu); 
-    match result { 
-        Ok(()) => {}, 
-        Err(_msg) => {}
-    }
+    let _result = execute(cpu, modes); 
+    // match result { 
+    //     Ok(()) => {}, 
+    //     Err(_msg) => {}
+    // }
 
     // handle restarting cpu, loading new rom, etc
 }
