@@ -239,8 +239,12 @@ fn parse_command_line_args() -> (Option<String>, HashSet<OptionalModes>) {
     for (idx, value) in argv.iter().enumerate() { 
         if idx == 0 { continue; }
         match value.as_str() { 
-            "-d" => optional_modes.insert(OptionalModes::DebugMessages), 
-            "-s" => optional_modes.insert(OptionalModes::ManualStepping), 
+            "-d" | "--debug" => optional_modes.insert(OptionalModes::DebugMessages), 
+            "-h" | "--help" => { 
+                print_usage(); 
+                std::process::exit(0); 
+            }, 
+            "-s" | "--step" => optional_modes.insert(OptionalModes::ManualStepping), 
             _ if ch8_re_pattern.is_match(value.as_str()) => {
                 filename = Some(value.to_owned()); 
                 true
@@ -253,16 +257,16 @@ fn parse_command_line_args() -> (Option<String>, HashSet<OptionalModes>) {
     (filename, optional_modes)
 }
 
-fn print_usage(error_message: String) { 
-    println!("  ERROR: {}", error_message); 
+fn print_usage() { 
     print!(
 "  USAGE:: ./chip8 [-d | -s | {{filename}}.ch8]
 
    DESCRIPTION: This is a Chip-8 interpreter built in rust 
 
    OPTIONS: 
-     -d -> turns on debugging information about current instructions and memory
-     -s -> turns on manual stepping
+     -d | --debug -> turns on debugging information about current instructions and memory
+     -h | --help  -> print usage and return
+     -s | --step  -> turns on manual stepping
 "
     ); 
 }

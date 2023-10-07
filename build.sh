@@ -16,6 +16,7 @@ CLEAR_FLAG=false
 TEST_FLAG=false
 DEBUG_MSG_FLAG=''
 MANUAL_STEP_FLAG=''
+HELP_FLAG=''
 FILENAME=''
 
 while [[ $# -gt 0 ]]; do 
@@ -28,7 +29,11 @@ while [[ $# -gt 0 ]]; do
             DEBUG_MSG_FLAG='-d'
             shift
             ;; 
-        -s|-step) 
+        -h|--help) 
+            HELP_FLAG='-h'
+            shift
+            ;;
+        -s|--step) 
             MANUAL_STEP_FLAG='-s'
             shift
             ;; 
@@ -65,9 +70,9 @@ fi
 # run executable
 echo 'STDOUT:'
 if [ "$FILENAME" = "" ] ; then 
-    ./target/debug/$PROJECT_NAME $DEBUG_MSG_FLAG $MANUAL_STEP_FLAG 
+    ./target/debug/$PROJECT_NAME $DEBUG_MSG_FLAG $MANUAL_STEP_FLAG $HELP_FLAG
 else 
-    ./target/debug/$PROJECT_NAME $DEBUG_MSG_FLAG $MANUAL_STEP_FLAG "$FILENAME"
+    ./target/debug/$PROJECT_NAME $DEBUG_MSG_FLAG $MANUAL_STEP_FLAG $HELP_FLAG "$FILENAME"
 fi
 
 # check exit status
