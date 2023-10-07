@@ -11,6 +11,8 @@ use sdl2::rect::Rect;
 use sdl2::render::Canvas;
 use sdl2::video::Window; 
 
+use regex::Regex; 
+
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::time::Instant;
@@ -18,10 +20,12 @@ use std::env;
 use std::fs;
 use std::fs::File;  
 use std::io::Read; 
+use std::process; 
  
 const PIXEL_WIDTH  : usize = 10; 
 const CANVAS_WIDTH : usize = SCREEN_WIDTH * PIXEL_WIDTH; 
 const CANVAS_HEIGHT: usize = SCREEN_HEIGHT * PIXEL_WIDTH; 
+const OSA_SCRIPTS_PATH: &str = "/Users/nicktrueb/.osascripts";
 
 #[derive(PartialEq, Debug)]
 enum GameState { 
@@ -118,25 +122,16 @@ fn execute(mut cpu: CPU, modes: HashSet<OptionalModes>) -> Result<(), String> {
                             canvas.set_draw_color(Color::BLACK);
                             canvas.clear();
                             canvas.present(); 
-                            if modes.contains(&OptionalModes::DebugMessages) { 
-                                println!("Resetting and pausing cpu ..."); 
-                            }
                         }, 
                         SdlKeycode::Space => {
                             state = match state {  
                                 GameState::Paused  => GameState::Running, 
                                 GameState::Running => GameState::Paused
                             }; 
-                            if modes.contains(&OptionalModes::DebugMessages) { 
-                                println!("Toggling game state to {:?}", state);  
-                            }
                         },
                         SdlKeycode::Return => {
                             if modes.contains(&OptionalModes::ManualStepping) {
                                 manual_step_signal = true; 
-                            }
-                            if modes.contains(&OptionalModes::DebugMessages) { 
-                                println!("Stepping now ..."); 
                             }
                         }, 
                         _ => {}, 
@@ -210,46 +205,58 @@ fn execute(mut cpu: CPU, modes: HashSet<OptionalModes>) -> Result<(), String> {
     Ok(())
 }
 
-fn parse_command_line_args() -> Result<(String, HashSet<OptionalModes>), String> { 
+fn get_file_from_file_chooser_dialog() -> String { 
+    let output = process::Command::new("sh")
+        .arg("-c")
+        .arg(format!("osascript {}/file-dialog.scpt", OSA_SCRIPTS_PATH))
+        .output()
+        .expect("ERROR: failed to get output from file chooser dialog command"); 
 
-    // check minimum length of args
+    let output_str = String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .to_string(); 
+
+    let err_str = String::from_utf8_lossy(&output.stderr)
+        .trim()
+        .to_string(); 
+
+    if err_str.len() != 0 { 
+        println!("ERROR: failed to get file from file chooser dialog:\n{}", err_str); 
+        std::process::exit(1); 
+    }
+
+    output_str
+}
+
+fn parse_command_line_args() -> (Option<String>, HashSet<OptionalModes>) { 
+
     let argv: Vec<String> = env::args().collect(); 
-    let argc: usize = argv.len(); 
-    if argc < 2 { 
-        return Err(String::from("Arguments of incorrect length provided"));
-    }
+    let mut filename: Option<String> = None; 
+    let mut optional_modes: HashSet<OptionalModes> = HashSet::new(); 
+    let ch8_re_pattern = Regex::new("\\.ch8$").expect("ERROR: regex was not created successfully");
 
-    // last arg which should be the filename position
-    let filename: &String = &argv[argc-1]; 
-    if filename.len() < 4 { 
-        return Err(String::from("Argument too short to contain .ch8")); 
-    }
-    if &filename[filename.len()-4..filename.len()] != ".ch8" { 
-        return Err(String::from("Argument does not contain .ch8 extension")); 
-    }
-
-    // parse possible flags before filename
-    let mut optional_modes: HashSet<OptionalModes> = HashSet::new();  
-
-    if argc == 2 { return Ok((filename.to_owned(), optional_modes)); }
-
-    for i in 1..argc-1 { 
-        let mode: OptionalModes = match argv[i].as_str() { 
-            "-d" => OptionalModes::DebugMessages, 
-            "-s" => OptionalModes::ManualStepping, 
-            _ => return Err(format!("Unknown flag: {}", argv[i]))
+    // loop through args and mark flags / parse filename
+    for (idx, value) in argv.iter().enumerate() { 
+        if idx == 0 { continue; }
+        match value.as_str() { 
+            "-d" => optional_modes.insert(OptionalModes::DebugMessages), 
+            "-s" => optional_modes.insert(OptionalModes::ManualStepping), 
+            _ if ch8_re_pattern.is_match(value.as_str()) => {
+                filename = Some(value.to_owned()); 
+                true
+            }, 
+            _ => panic!("ERROR: encountered unknown value: {}", value.as_str())
         }; 
-        optional_modes.insert(mode); 
     }
 
     // return filename and parsed modes
-    Ok((filename.to_owned(), optional_modes))
+    (filename, optional_modes)
 }
 
 fn print_usage(error_message: String) { 
     println!("  ERROR: {}", error_message); 
     print!(
-"  USAGE:: ./chip8 [-d | -s] {{filename}}.ch8
+"  USAGE:: ./chip8 [-d | -s | {{filename}}.ch8]
 
    DESCRIPTION: This is a Chip-8 interpreter built in rust 
 
@@ -263,13 +270,18 @@ fn print_usage(error_message: String) {
 pub fn main() {
 
     // parse input file name
-    let (filename, modes)= match parse_command_line_args() {
-        Ok((filename_, modes_)) => (filename_, modes_), 
-        Err(message) => { 
-            print_usage(message); 
-            std::process::exit(1); 
-        }
+    let (filename_option, modes)= parse_command_line_args(); 
+
+    // get file from dialog if filename was not parse in arguments
+    let filename = match filename_option { 
+        Some(value) => value, 
+        None => get_file_from_file_chooser_dialog()
     };
+
+    if !Regex::new("\\.ch8$").unwrap().is_match(&filename) { 
+        println!("ERROR: invalid filename: {}", filename); 
+        std::process::exit(1); 
+    }
 
     // open file 
     let file: File = match fs::File::open(&filename) { 

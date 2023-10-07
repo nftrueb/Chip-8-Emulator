@@ -64,7 +64,11 @@ fi
 
 # run executable
 echo 'STDOUT:'
-./target/debug/$PROJECT_NAME $DEBUG_MSG_FLAG $MANUAL_STEP_FLAG "$FILENAME"
+if [ "$FILENAME" = "" ] ; then 
+    ./target/debug/$PROJECT_NAME $DEBUG_MSG_FLAG $MANUAL_STEP_FLAG 
+else 
+    ./target/debug/$PROJECT_NAME $DEBUG_MSG_FLAG $MANUAL_STEP_FLAG "$FILENAME"
+fi
 
 # check exit status
 exit_code=$? 
