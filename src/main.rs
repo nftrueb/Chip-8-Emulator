@@ -15,12 +15,15 @@ use regex::Regex;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::ops::Deref;
 use std::time::Instant;
 use std::env; 
 use std::fs;
 use std::fs::File;  
 use std::io::Read; 
 use std::process; 
+use std::rc::Rc; 
+use std::cell::RefCell; 
  
 const PIXEL_WIDTH  : usize = 10; 
 const CANVAS_WIDTH : usize = SCREEN_WIDTH * PIXEL_WIDTH; 
@@ -74,15 +77,15 @@ fn execute(mut cpu: CPU, modes: HashSet<OptionalModes>) -> Result<(), String> {
     let sdl_context = sdl2::init()?;
     let video_subsystem = sdl_context.video()?;
 
-    // get window instance
-    let window: Window = video_subsystem
+    // get initial window instance
+    let init_window: Window = video_subsystem
         .window("CHIP-8", CANVAS_WIDTH as u32, CANVAS_HEIGHT as u32)
         .position_centered()
         .build()
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?; 
 
     // get canvas instance
-    let mut canvas: Canvas<Window> = window
+    let mut canvas: Canvas<Window> = init_window
         .into_canvas()
         .target_texture()
         .present_vsync()
@@ -133,7 +136,15 @@ fn execute(mut cpu: CPU, modes: HashSet<OptionalModes>) -> Result<(), String> {
                             if modes.contains(&OptionalModes::ManualStepping) {
                                 manual_step_signal = true; 
                             }
-                        }, 
+                        },
+                        SdlKeycode::LShift => { 
+                            let (x, y) = canvas.window().size();
+                            canvas
+                                .window_mut()
+                                .set_size((x+64) as u32, y as u32)
+                                .expect("Failed to resize window");
+                            println!("{} {}", x, y); 
+                        } 
                         _ => {}, 
                     }
                 },
