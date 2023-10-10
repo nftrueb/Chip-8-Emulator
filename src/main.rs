@@ -6,7 +6,6 @@ extern crate sdl2;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode as SdlKeycode;
 use sdl2::pixels::Color;
-use sdl2::rect::Point;
 use sdl2::rect::Rect;
 use sdl2::render::Canvas;
 use sdl2::video::Window; 
@@ -31,8 +30,8 @@ const DEBUG_CANVAS_WIDTH: usize = CANVAS_WIDTH * 2;
 const DEBUG_CANVAS_HEIGHT: usize = CANVAS_HEIGHT * 2; 
 const REGION_WIDTH      : i32 = CANVAS_WIDTH as i32; 
 const REGION_HEIGHT     : i32 = CANVAS_HEIGHT as i32; 
-// const REGION_ROM_X      : i32 = 0; 
-// const REGION_ROM_Y      : i32 = 0; 
+const REGION_ROM_X      : i32 = 0; 
+const REGION_ROM_Y      : i32 = 0; 
 const REGION_REGISTER_X : i32 = REGION_WIDTH; 
 const REGION_REGISTER_Y : i32 = 0;
 const REGION_PC_X       : i32 = 0; 
@@ -81,6 +80,26 @@ fn build_keycode_hashmap() -> HashMap<SdlKeycode, Chip8Input>{
     ])
 }
 
+fn write_text(text: String, x_off: i32, y_off: i32, color: Color, font: &Font, canvas: &mut Canvas<Window>) { 
+    // text surface 
+    let surface = 
+        font.render(&text)
+            .blended(color)
+            .expect("ERROR:: failed to render text"); 
+
+    // text texture 
+    let texture_creator = canvas.texture_creator();
+    let texture = texture_creator
+        .create_texture_from_surface(&surface)
+        .expect("ERROR: failed to create text texture");
+    let (width, height) = surface.size(); 
+
+    // copy text to canvas
+    let x = x_off - ((width/ 2) as i32);
+    canvas.copy(&texture, None, Rect::new(x, y_off, width, height))
+        .expect("ERROR:: failed to copy text to canvas");
+}
+
 fn draw_rom_region(canvas: &mut Canvas<Window>, pixels: &[bool; 2048]) { 
     for (idx, pixel) in pixels.into_iter().enumerate() { 
         let row: usize = idx / SCREEN_WIDTH; 
@@ -103,70 +122,218 @@ fn draw_rom_region(canvas: &mut Canvas<Window>, pixels: &[bool; 2048]) {
     }
 }
 
-fn draw_register_region(canvas: &mut Canvas<Window>, font: &Font) { 
-    // canvas.set_draw_color(Color::BLACK);
-    // canvas.draw_rect(Rect::new(REGION_REGISTER_X, REGION_REGISTER_Y, REGION_WIDTH as u32, REGION_HEIGHT as u32)); 
-    // text surface 
-    let text_surface = 
-        font.render("--- REGISTERS ---")
-            .blended(Color::WHITE)
-            .expect("ERROR:: failed to render text"); 
+fn draw_register_region(cpu: &CPU, canvas: &mut Canvas<Window>, font: &Font) { 
+    let row_height = 2*font.height(); 
+    let columns = 4; 
+    let title_row = 0; 
+    let v_register_row = 1; 
+    let i_register_row = 5; 
+    let pc_row = 5;
 
-    // text texture 
-    let texture_creator = canvas.texture_creator(); 
-    let text_texture = 
-        texture_creator.create_texture_from_surface(&text_surface)
-            .expect("ERROR: failed to create text texture"); 
-         
-    // copy texture 
-    let title_x = REGION_REGISTER_X + ((REGION_WIDTH / 2) as i32) - ((text_surface.width() / 2) as i32) ;
-    canvas.copy(
-        &text_texture, 
-        None, 
-        Rect::new(title_x, REGION_REGISTER_Y, text_surface.width(), text_surface.height()))
-        .expect("ERROR:: failed to copy text to canvas");
+    // write title for this region
+    write_text("--- REGISTERS ---".to_string(), 
+        REGION_REGISTER_X + (REGION_WIDTH / 2), 
+        REGION_REGISTER_Y + row_height * title_row, 
+        Color::WHITE, 
+        font, 
+        canvas);
+
+    // write grid of registers and their values
+    for (idx, value) in cpu.registers.iter().enumerate() { 
+        let x_off = REGION_REGISTER_X + (REGION_WIDTH / (columns + 1)) * ((idx as i32 % columns) + 1); 
+        let y_off = REGION_REGISTER_Y + (row_height * v_register_row) + (row_height * (idx as i32 / columns));
+        write_text(
+            format!("V{:X}: {:#04x}", idx, value), 
+            x_off, 
+            y_off,
+            Color::WHITE, 
+            font, 
+            canvas); 
+    }
+
+    // write I register value
+    {
+        let x_off = REGION_REGISTER_X + REGION_WIDTH / (columns + 1); 
+        let y_off = REGION_REGISTER_Y + row_height * i_register_row; 
+        write_text(
+            format!("I : x{:03x}", cpu.reg_i), 
+            x_off, 
+            y_off,
+            Color::WHITE, 
+            font, 
+            canvas); 
+    }
+
+    // write PC value
+    {
+        let x_off = REGION_REGISTER_X + REGION_WIDTH / (columns + 1) * 2; 
+        let y_off = REGION_REGISTER_Y + row_height * pc_row; 
+        write_text(
+            format!("PC: x{:03x}", cpu.pc), 
+            x_off, 
+            y_off,
+            Color::WHITE, 
+            font, 
+            canvas); 
+    }
 }
 
-fn draw_pc_region(canvas: &mut Canvas<Window>, font: &Font) { 
-    let text_surface = 
-        font.render("--- PC POINTER ---")
-            .blended(Color::WHITE)
-            .expect("ERROR:: failed to render text"); 
+fn draw_pc_region(cpu: &CPU, canvas: &mut Canvas<Window>, font: &Font) { 
+    let row_height = 2*font.height(); 
+    let columns = 4; 
+    let title_row = 0; 
+    let memory_row = 1; 
 
-    // text texture 
-    let texture_creator = canvas.texture_creator(); 
-    let text_texture = 
-        texture_creator.create_texture_from_surface(&text_surface)
-            .expect("ERROR: failed to create text texture"); 
-        
-    // copy texture 
-    let title_x = REGION_PC_X + ((REGION_WIDTH / 2) as i32) - ((text_surface.width() / 2) as i32) ;
-    canvas.copy(
-        &text_texture, 
-        None, 
-        Rect::new(title_x, REGION_PC_Y, text_surface.width(), text_surface.height()))
-        .expect("ERROR:: failed to copy text to canvas");
+    // write title for this region
+    write_text("--- PC POINTER ---".to_string(), 
+        REGION_PC_X + (REGION_WIDTH / 2), 
+        REGION_PC_Y + row_height * title_row, 
+        Color::WHITE, 
+        font, 
+        canvas);
+
+    // address and memory header
+    { 
+        let x_off = REGION_PC_X + (REGION_WIDTH / (columns + 1)) * 2; 
+        let y_off = REGION_PC_Y + (row_height * memory_row);
+        write_text(
+            "ADDR".to_string(), 
+            x_off, 
+            y_off,
+            Color::WHITE, 
+            font, 
+            canvas); 
+    }
+
+    { 
+        let x_off = REGION_PC_X + (REGION_WIDTH / (columns + 1)) * 3; 
+        let y_off = REGION_PC_Y + (row_height * memory_row);
+        write_text(
+            "MEM_".to_string(), 
+            x_off, 
+            y_off,
+            Color::WHITE, 
+            font, 
+            canvas); 
+    }
+
+    // draw pc and it's matching memory
+    for i in 0..5 { 
+        if cpu.pc + (i*2) >= 0x1000 { continue; }
+        {
+            let x_off = REGION_PC_X + (REGION_WIDTH / (columns + 1)) * 2; 
+            let y_off = REGION_PC_Y + (row_height * (memory_row + 1 + i as i32));
+            write_text(
+                format!("{:#04x}", cpu.pc + (i*2)), 
+                x_off, 
+                y_off,
+                Color::WHITE, 
+                font, 
+                canvas); 
+        }
+        {
+            let x_off = REGION_PC_X + (REGION_WIDTH / (columns + 1)) * 3; 
+            let y_off = REGION_PC_Y + (row_height * (memory_row + 1 + i as i32));
+            write_text(
+                format!("{:02x}{:02x}", cpu.memory[cpu.pc+i], cpu.memory[cpu.pc+i+1]), 
+                x_off, 
+                y_off,
+                Color::WHITE, 
+                font, 
+                canvas); 
+        }
+    }
 } 
 
-fn draw_i_region(canvas: &mut Canvas<Window>, font: &Font) { 
-    let text_surface = 
-        font.render("--- I REGISTER POINTER ---")
-            .blended(Color::WHITE)
-            .expect("ERROR:: failed to render text"); 
+fn draw_i_region(cpu: &CPU, canvas: &mut Canvas<Window>, font: &Font) { 
+    let row_height = 2*font.height(); 
+    let columns = 4; 
+    let title_row = 0; 
+    let memory_row = 1; 
 
-    // text texture 
-    let texture_creator = canvas.texture_creator(); 
-    let text_texture = 
-        texture_creator.create_texture_from_surface(&text_surface)
-            .expect("ERROR: failed to create text texture"); 
-        
-    // copy texture 
-    let title_x = REGION_I_X + ((REGION_WIDTH / 2) as i32) - ((text_surface.width() / 2) as i32) ;
-    canvas.copy(
-        &text_texture, 
-        None, 
-        Rect::new(title_x, REGION_I_Y, text_surface.width(), text_surface.height()))
-        .expect("ERROR:: failed to copy text to canvas");
+    // write title for this region
+    write_text("--- I REGISTER POINTER ---".to_string(), 
+        REGION_I_X + (REGION_WIDTH / 2), 
+        REGION_I_Y + row_height * title_row, 
+        Color::WHITE, 
+        font, 
+        canvas);
+
+    // address and memory header
+    { 
+        let x_off = REGION_I_X + (REGION_WIDTH / (columns + 1)) * 2; 
+        let y_off = REGION_I_Y + (row_height * memory_row);
+        write_text(
+            "ADDR".to_string(), 
+            x_off, 
+            y_off,
+            Color::WHITE, 
+            font, 
+            canvas); 
+    }
+
+    { 
+        let x_off = REGION_I_X + (REGION_WIDTH / (columns + 1)) * 3; 
+        let y_off = REGION_I_Y + (row_height * memory_row);
+        write_text(
+            "MEM_".to_string(), 
+            x_off, 
+            y_off,
+            Color::WHITE, 
+            font, 
+            canvas); 
+    }
+
+    // draw pc and it's matching memory
+    for i in 0..5 { 
+        if cpu.reg_i + (i*2) >= 0x1000 { continue; }
+        {
+            let x_off = REGION_I_X + (REGION_WIDTH / (columns + 1)) * 2; 
+            let y_off = REGION_I_Y + (row_height * (memory_row + 1 + i as i32));
+            write_text(
+                format!("{:#04x}", cpu.reg_i + (i*2)), 
+                x_off, 
+                y_off,
+                Color::WHITE, 
+                font, 
+                canvas); 
+        }
+        {
+            let x_off = REGION_I_X + (REGION_WIDTH / (columns + 1)) * 3; 
+            let y_off = REGION_I_Y + (row_height * (memory_row + 1 + i as i32));
+            write_text(
+                format!("{:02x}{:02x}", cpu.memory[cpu.reg_i+i], cpu.memory[cpu.reg_i+i+1]), 
+                x_off, 
+                y_off,
+                Color::WHITE, 
+                font, 
+                canvas); 
+        }
+    }
+}
+
+fn draw_entire_window(canvas: &mut Canvas<Window>, cpu: &CPU, font: &Font, debug: bool, state: &GameState) { 
+    canvas.set_draw_color(BACKGROUND_COLOR); 
+    canvas.clear();
+
+    if debug { 
+        draw_register_region(cpu, canvas, font); 
+        draw_pc_region(cpu, canvas, font); 
+        draw_i_region(cpu, canvas, font); 
+    }
+
+    draw_rom_region(canvas, &cpu.pixels); 
+
+    if state == &GameState::Paused { 
+        write_text("PRESS [SPACE] TO START ROM".to_string(),
+            REGION_ROM_X + REGION_WIDTH / 2, 
+            REGION_ROM_Y + REGION_HEIGHT / 2, 
+            Color::GRAY, 
+            font, 
+            canvas)
+    }
+
+    canvas.present(); 
 }
 
 fn execute(mut cpu: CPU, mut modes: HashSet<OptionalModes>) -> Result<(), String> { 
@@ -201,14 +368,6 @@ fn execute(mut cpu: CPU, mut modes: HashSet<OptionalModes>) -> Result<(), String
         .build()
         .map_err(|e| e.to_string())?;
 
-    // reset canvas and update window
-    canvas.set_draw_color(BACKGROUND_COLOR);
-    canvas.clear();
-    draw_rom_region(&mut canvas, &cpu.pixels); 
-    canvas.present(); 
-
-    println!("{:?}", canvas.window().size()); 
-
     // load font 
     let point_size = 18; 
     let font = ttf_context.load_font(
@@ -216,8 +375,11 @@ fn execute(mut cpu: CPU, mut modes: HashSet<OptionalModes>) -> Result<(), String
         point_size
     ).expect("ERROR: failed to load external font"); 
 
-    let mut event_pump = sdl_context.event_pump()?;
+    // reset canvas and update window
     let mut state: GameState = GameState::Paused;
+    draw_entire_window(&mut canvas, &cpu, &font, modes.contains(&OptionalModes::Debug), &state); 
+
+    let mut event_pump = sdl_context.event_pump()?;
     let mut should_render_screen: bool = true; 
     let mut manual_step_signal: bool = false; 
     let mut prev_cpu_cycle_time: Instant = Instant::now(); 
@@ -241,16 +403,14 @@ fn execute(mut cpu: CPU, mut modes: HashSet<OptionalModes>) -> Result<(), String
                         SdlKeycode::Escape => {
                             cpu.reset(); 
                             state = GameState::Paused;
-                            canvas.set_draw_color(BACKGROUND_COLOR); 
-                            canvas.clear(); 
-                            draw_rom_region(&mut canvas, &cpu.pixels); 
-                            canvas.present();
+                            draw_entire_window(&mut canvas, &cpu, &font, modes.contains(&OptionalModes::Debug), &state); 
                         }, 
                         SdlKeycode::Space => {
                             state = match state {  
                                 GameState::Paused  => GameState::Running, 
                                 GameState::Running => GameState::Paused
                             }; 
+                            draw_entire_window(&mut canvas, &cpu, &font, modes.contains(&OptionalModes::Debug), &state);
                         },
                         SdlKeycode::RShift => {
                             if modes.contains(&OptionalModes::ManualStepping) {
@@ -277,10 +437,7 @@ fn execute(mut cpu: CPU, mut modes: HashSet<OptionalModes>) -> Result<(), String
                                 .window_mut()
                                 .set_size(width, height)
                                 .expect("Failed to resize window"); 
-                            canvas.set_draw_color(BACKGROUND_COLOR);
-                            canvas.clear();
-                            draw_rom_region(&mut canvas, &cpu.pixels); 
-                            canvas.present(); 
+                            draw_entire_window(&mut canvas, &cpu, &font, modes.contains(&OptionalModes::Debug), &state); 
                         } 
                         _ => {}, 
                     }
@@ -320,22 +477,7 @@ fn execute(mut cpu: CPU, mut modes: HashSet<OptionalModes>) -> Result<(), String
         // draw pixels on canvas at specified screen refresh frequency
         if prev_screen_refresh_time.elapsed().as_millis() >= 1_000 / screen_refresh_freq { 
             prev_screen_refresh_time = Instant::now(); 
-
-            canvas.set_draw_color(BACKGROUND_COLOR); 
-            canvas.clear(); 
-            
-            if modes.contains(&OptionalModes::Debug) { 
-                draw_register_region(&mut canvas, &font);
-                draw_pc_region(&mut canvas, &font); 
-                draw_i_region(&mut canvas, &font);
-
-                // region debug lines
-                canvas.set_draw_color(Color::RED); 
-                canvas.draw_line(Point::new(CANVAS_WIDTH as i32, 0), Point::new(CANVAS_WIDTH as i32, DEBUG_CANVAS_HEIGHT as i32)); 
-                canvas.draw_line(Point::new(0, CANVAS_HEIGHT as i32), Point::new(DEBUG_CANVAS_WIDTH as i32, CANVAS_HEIGHT as i32)); 
-            }
-            draw_rom_region(&mut canvas, &cpu.pixels); 
-            canvas.present();
+            draw_entire_window(&mut canvas, &cpu, &font, modes.contains(&OptionalModes::Debug), &state); 
         }
     }
 
