@@ -188,7 +188,7 @@ pub mod cpu {
             false
         }
 
-        pub fn step(&mut self, pressed_keys: Vec<usize>) -> (bool, String, String) { 
+        pub fn step(&mut self, pressed_keys: Vec<usize>) -> bool { 
 
             // decrement timers
             if self.delay_timer > 0 { self.delay_timer -= 1; }
@@ -265,13 +265,9 @@ pub mod cpu {
             }
 
             // increment pc 
-            let old_pc: usize = self.pc; 
             self.pc += if pc_inc { 2 } else { 0 }; 
 
-            return (should_render_screen, 
-                format!("{:#04x}", old_pc), 
-                format!("{:04x}", instruction)
-            ); 
+            should_render_screen
         }
 
         // ------------------------

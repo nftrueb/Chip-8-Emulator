@@ -1,4 +1,3 @@
-
 mod cpu; 
 pub use cpu::cpu::{CPU, SCREEN_WIDTH, SCREEN_HEIGHT, Chip8Input, get_chip8_key_idx}; 
 
@@ -7,28 +6,39 @@ extern crate sdl2;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode as SdlKeycode;
 use sdl2::pixels::Color;
+use sdl2::rect::Point;
 use sdl2::rect::Rect;
 use sdl2::render::Canvas;
 use sdl2::video::Window; 
-
+use sdl2::ttf::Font;
 use regex::Regex; 
-
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::ops::Deref;
 use std::time::Instant;
 use std::env; 
 use std::fs;
 use std::fs::File;  
 use std::io::Read; 
 use std::process; 
-use std::rc::Rc; 
-use std::cell::RefCell; 
+use std::path::Path; 
  
 const PIXEL_WIDTH  : usize = 10; 
 const CANVAS_WIDTH : usize = SCREEN_WIDTH * PIXEL_WIDTH; 
 const CANVAS_HEIGHT: usize = SCREEN_HEIGHT * PIXEL_WIDTH; 
 const OSA_SCRIPTS_PATH: &str = "/Users/nicktrueb/.osascripts";
+const BACKGROUND_COLOR: Color = Color::RGB(50, 50, 150); 
+const DEBUG_CANVAS_WIDTH: usize = CANVAS_WIDTH * 2; 
+const DEBUG_CANVAS_HEIGHT: usize = CANVAS_HEIGHT * 2; 
+const REGION_WIDTH      : i32 = CANVAS_WIDTH as i32; 
+const REGION_HEIGHT     : i32 = CANVAS_HEIGHT as i32; 
+// const REGION_ROM_X      : i32 = 0; 
+// const REGION_ROM_Y      : i32 = 0; 
+const REGION_REGISTER_X : i32 = REGION_WIDTH; 
+const REGION_REGISTER_Y : i32 = 0;
+const REGION_PC_X       : i32 = 0; 
+const REGION_PC_Y       : i32 = REGION_HEIGHT; 
+const REGION_I_X        : i32 = REGION_WIDTH; 
+const REGION_I_Y        : i32 = REGION_HEIGHT;  
 
 #[derive(PartialEq, Debug)]
 enum GameState { 
@@ -38,7 +48,7 @@ enum GameState {
 
 #[derive(Eq, PartialEq, Hash, Debug)]
 enum OptionalModes { 
-    DebugMessages, 
+    Debug, 
     ManualStepping
 }
 
@@ -71,15 +81,114 @@ fn build_keycode_hashmap() -> HashMap<SdlKeycode, Chip8Input>{
     ])
 }
 
-fn execute(mut cpu: CPU, modes: HashSet<OptionalModes>) -> Result<(), String> { 
+fn draw_rom_region(canvas: &mut Canvas<Window>, pixels: &[bool; 2048]) { 
+    for (idx, pixel) in pixels.into_iter().enumerate() { 
+        let row: usize = idx / SCREEN_WIDTH; 
+        let col: usize = idx % SCREEN_WIDTH;
+        let rect = Rect::new(
+            (col * PIXEL_WIDTH) as i32, 
+            (row * PIXEL_WIDTH) as i32, 
+            PIXEL_WIDTH as u32, 
+            PIXEL_WIDTH as u32
+        );
+        let color: Color = if *pixel { 
+            Color::WHITE
+        } else { 
+            Color::BLACK
+        };
+        
+        canvas.set_draw_color(color);
+        canvas.fill_rect(rect).expect("rect not filled correctly when drawing screen!!");
+        // println!("{:?}", rect); 
+    }
+}
 
-    // get os specific window info
-    let sdl_context = sdl2::init()?;
-    let video_subsystem = sdl_context.video()?;
+fn draw_register_region(canvas: &mut Canvas<Window>, font: &Font) { 
+    // canvas.set_draw_color(Color::BLACK);
+    // canvas.draw_rect(Rect::new(REGION_REGISTER_X, REGION_REGISTER_Y, REGION_WIDTH as u32, REGION_HEIGHT as u32)); 
+    // text surface 
+    let text_surface = 
+        font.render("--- REGISTERS ---")
+            .blended(Color::WHITE)
+            .expect("ERROR:: failed to render text"); 
+
+    // text texture 
+    let texture_creator = canvas.texture_creator(); 
+    let text_texture = 
+        texture_creator.create_texture_from_surface(&text_surface)
+            .expect("ERROR: failed to create text texture"); 
+         
+    // copy texture 
+    let title_x = REGION_REGISTER_X + ((REGION_WIDTH / 2) as i32) - ((text_surface.width() / 2) as i32) ;
+    canvas.copy(
+        &text_texture, 
+        None, 
+        Rect::new(title_x, REGION_REGISTER_Y, text_surface.width(), text_surface.height()))
+        .expect("ERROR:: failed to copy text to canvas");
+}
+
+fn draw_pc_region(canvas: &mut Canvas<Window>, font: &Font) { 
+    let text_surface = 
+        font.render("--- PC POINTER ---")
+            .blended(Color::WHITE)
+            .expect("ERROR:: failed to render text"); 
+
+    // text texture 
+    let texture_creator = canvas.texture_creator(); 
+    let text_texture = 
+        texture_creator.create_texture_from_surface(&text_surface)
+            .expect("ERROR: failed to create text texture"); 
+        
+    // copy texture 
+    let title_x = REGION_PC_X + ((REGION_WIDTH / 2) as i32) - ((text_surface.width() / 2) as i32) ;
+    canvas.copy(
+        &text_texture, 
+        None, 
+        Rect::new(title_x, REGION_PC_Y, text_surface.width(), text_surface.height()))
+        .expect("ERROR:: failed to copy text to canvas");
+} 
+
+fn draw_i_region(canvas: &mut Canvas<Window>, font: &Font) { 
+    let text_surface = 
+        font.render("--- I REGISTER POINTER ---")
+            .blended(Color::WHITE)
+            .expect("ERROR:: failed to render text"); 
+
+    // text texture 
+    let texture_creator = canvas.texture_creator(); 
+    let text_texture = 
+        texture_creator.create_texture_from_surface(&text_surface)
+            .expect("ERROR: failed to create text texture"); 
+        
+    // copy texture 
+    let title_x = REGION_I_X + ((REGION_WIDTH / 2) as i32) - ((text_surface.width() / 2) as i32) ;
+    canvas.copy(
+        &text_texture, 
+        None, 
+        Rect::new(title_x, REGION_I_Y, text_surface.width(), text_surface.height()))
+        .expect("ERROR:: failed to copy text to canvas");
+}
+
+fn execute(mut cpu: CPU, mut modes: HashSet<OptionalModes>) -> Result<(), String> { 
+
+    // initialize contexts 
+    let sdl_context = 
+        sdl2::init()
+        .expect("ERROR:: failed to initialize SDL context");
+    let video_subsystem = 
+        sdl_context.video()
+            .expect("ERROR: failed to load video subsystem");
+    let ttf_context = 
+        sdl2::ttf::init()
+            .expect("ERROR: failed to load ttf context"); 
 
     // get initial window instance
+    let (width, height) = match modes.contains(&OptionalModes::Debug) { 
+        true => { (DEBUG_CANVAS_WIDTH as u32, DEBUG_CANVAS_HEIGHT as u32) },
+        false => { (CANVAS_WIDTH as u32, CANVAS_HEIGHT as u32) }
+    }; 
     let init_window: Window = video_subsystem
-        .window("CHIP-8", CANVAS_WIDTH as u32, CANVAS_HEIGHT as u32)
+        .window("CHIP-8", width, height)
         .position_centered()
         .build()
         .map_err(|e| e.to_string())?; 
@@ -93,9 +202,19 @@ fn execute(mut cpu: CPU, modes: HashSet<OptionalModes>) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
 
     // reset canvas and update window
-    canvas.set_draw_color(Color::BLACK);
+    canvas.set_draw_color(BACKGROUND_COLOR);
     canvas.clear();
-    canvas.present();
+    draw_rom_region(&mut canvas, &cpu.pixels); 
+    canvas.present(); 
+
+    println!("{:?}", canvas.window().size()); 
+
+    // load font 
+    let point_size = 18; 
+    let font = ttf_context.load_font(
+        Path::new("/Users/nicktrueb/Programming/chip8/assets/FragmentMono-Regular.ttf"), 
+        point_size
+    ).expect("ERROR: failed to load external font"); 
 
     let mut event_pump = sdl_context.event_pump()?;
     let mut state: GameState = GameState::Paused;
@@ -120,11 +239,12 @@ fn execute(mut cpu: CPU, modes: HashSet<OptionalModes>) -> Result<(), String> {
                 } => { 
                     match key {
                         SdlKeycode::Escape => {
-                            state = GameState::Paused;
                             cpu.reset(); 
-                            canvas.set_draw_color(Color::BLACK);
-                            canvas.clear();
-                            canvas.present(); 
+                            state = GameState::Paused;
+                            canvas.set_draw_color(BACKGROUND_COLOR); 
+                            canvas.clear(); 
+                            draw_rom_region(&mut canvas, &cpu.pixels); 
+                            canvas.present();
                         }, 
                         SdlKeycode::Space => {
                             state = match state {  
@@ -132,18 +252,35 @@ fn execute(mut cpu: CPU, modes: HashSet<OptionalModes>) -> Result<(), String> {
                                 GameState::Running => GameState::Paused
                             }; 
                         },
-                        SdlKeycode::Return => {
+                        SdlKeycode::RShift => {
                             if modes.contains(&OptionalModes::ManualStepping) {
                                 manual_step_signal = true; 
                             }
                         },
-                        SdlKeycode::LShift => { 
-                            let (x, y) = canvas.window().size();
+                        SdlKeycode::D => { 
+
+                            // toggle 'Debug' in modes hashset 
+                            if modes.contains(&OptionalModes::Debug) { 
+                                modes.remove(&OptionalModes::Debug); 
+                            } else { 
+                                modes.insert(OptionalModes::Debug); 
+                            }
+
+                            // get dimensions of new window based on 'Debug' status
+                            let (width, height) = match modes.contains(&OptionalModes::Debug) { 
+                                true => { (DEBUG_CANVAS_WIDTH as u32, DEBUG_CANVAS_HEIGHT as u32) },
+                                false => { (CANVAS_WIDTH as u32, CANVAS_HEIGHT as u32) }
+                            }; 
+
+                            // set window dimensions and redraw canvas
                             canvas
                                 .window_mut()
-                                .set_size((x+64) as u32, y as u32)
-                                .expect("Failed to resize window");
-                            println!("{} {}", x, y); 
+                                .set_size(width, height)
+                                .expect("Failed to resize window"); 
+                            canvas.set_draw_color(BACKGROUND_COLOR);
+                            canvas.clear();
+                            draw_rom_region(&mut canvas, &cpu.pixels); 
+                            canvas.present(); 
                         } 
                         _ => {}, 
                     }
@@ -165,50 +302,39 @@ fn execute(mut cpu: CPU, modes: HashSet<OptionalModes>) -> Result<(), String> {
                 manual_step_signal = false; 
 
                 // get vector of pressed keys to be matched in cpu
-                let pressed_keys: Vec<usize> = event_pump.keyboard_state()
-                                                            .pressed_scancodes()
-                                                            .filter_map(SdlKeycode::from_scancode)
-                                                            .map(|keycode| keyboard_to_chip8_input_map.get(&keycode))
-                                                            .filter(|keycode| *keycode != None)
-                                                            .map(|keycode| keycode.unwrap())
-                                                            .map(|key| get_chip8_key_idx(key))
-                                                            .collect(); 
-                let (needs_rendering, pc, instruction_string) = cpu.step(pressed_keys);
-                if !should_render_screen { should_render_screen = needs_rendering };
+                let pressed_keys: Vec<usize> = 
+                    event_pump.keyboard_state()
+                        .pressed_scancodes()
+                        .filter_map(SdlKeycode::from_scancode)
+                        .map(|keycode| keyboard_to_chip8_input_map.get(&keycode))
+                        .filter(|keycode| *keycode != None)
+                        .map(|keycode| keycode.unwrap())
+                        .map(|key| get_chip8_key_idx(key))
+                        .collect(); 
 
-                // print debug info after executing instruction
-                if modes.contains(&OptionalModes::DebugMessages) { 
-                    println!("PC: {}  |  Instruction: {}", pc, instruction_string);
-                    println!("I: {:#04x}", cpu.reg_i); 
-                    for (idx, reg) in cpu.registers.iter().enumerate() { 
-                        if idx % 4 == 0 && idx != 0 { print!("\n"); }
-                        print!("{:#04x} ", reg); 
-                    }
-                    print!("\n");
-                }  
+                let needs_rendering = cpu.step(pressed_keys);
+                if !should_render_screen { should_render_screen = needs_rendering };
             }
         }
 
         // draw pixels on canvas at specified screen refresh frequency
         if prev_screen_refresh_time.elapsed().as_millis() >= 1_000 / screen_refresh_freq { 
             prev_screen_refresh_time = Instant::now(); 
-            if !should_render_screen { continue; }
 
-            should_render_screen = false; 
+            canvas.set_draw_color(BACKGROUND_COLOR); 
             canvas.clear(); 
-            for (idx, pixel) in (&cpu.pixels).into_iter().enumerate() { 
-                let row: usize = idx / SCREEN_WIDTH; 
-                let col: usize = idx % SCREEN_WIDTH;
-                let rect = Rect::new((col * PIXEL_WIDTH) as i32 , (row * PIXEL_WIDTH) as i32, PIXEL_WIDTH as u32, PIXEL_WIDTH as u32);
-                let color: Color = if *pixel { 
-                    Color::WHITE
-                } else { 
-                    Color::BLACK
-                };
-                
-                canvas.set_draw_color(color);
-                canvas.fill_rect(rect).expect("rect not filled correctly when drawing screen!!");
+            
+            if modes.contains(&OptionalModes::Debug) { 
+                draw_register_region(&mut canvas, &font);
+                draw_pc_region(&mut canvas, &font); 
+                draw_i_region(&mut canvas, &font);
+
+                // region debug lines
+                canvas.set_draw_color(Color::RED); 
+                canvas.draw_line(Point::new(CANVAS_WIDTH as i32, 0), Point::new(CANVAS_WIDTH as i32, DEBUG_CANVAS_HEIGHT as i32)); 
+                canvas.draw_line(Point::new(0, CANVAS_HEIGHT as i32), Point::new(DEBUG_CANVAS_WIDTH as i32, CANVAS_HEIGHT as i32)); 
             }
+            draw_rom_region(&mut canvas, &cpu.pixels); 
             canvas.present();
         }
     }
@@ -250,7 +376,7 @@ fn parse_command_line_args() -> (Option<String>, HashSet<OptionalModes>) {
     for (idx, value) in argv.iter().enumerate() { 
         if idx == 0 { continue; }
         match value.as_str() { 
-            "-d" | "--debug" => optional_modes.insert(OptionalModes::DebugMessages), 
+            "-d" | "--debug" => optional_modes.insert(OptionalModes::Debug), 
             "-h" | "--help" => { 
                 print_usage(); 
                 std::process::exit(0); 
@@ -278,6 +404,12 @@ fn print_usage() {
      -d | --debug -> turns on debugging information about current instructions and memory
      -h | --help  -> print usage and return
      -s | --step  -> turns on manual stepping
+
+   KEY COMMANDS (while program is running): 
+     ESCAPE  : reset ROM and set CPU to PAUSED
+     D       : toggle debugging interface in window
+     RETURN  : manually step through CPU
+     SPACE   : toggle CPU state between PAUSED and RUNNING
 "
     ); 
 }
@@ -288,7 +420,7 @@ pub fn main() {
     let (filename_option, modes)= parse_command_line_args(); 
 
     // get file from dialog if filename was not parse in arguments
-    let filename = match filename_option { 
+    let filename: String = match filename_option { 
         Some(value) => value, 
         None => get_file_from_file_chooser_dialog()
     };
@@ -314,7 +446,7 @@ pub fn main() {
     let mut cpu: CPU = CPU::new();  
     cpu.load_rom(rom_bytes);
 
-    if modes.contains(&OptionalModes::DebugMessages) { 
+    if modes.contains(&OptionalModes::Debug) { 
         println!("{}", cpu.dump_memory()); 
         println!("Starting CPU with the following modes: {:?}", modes); 
     }  
