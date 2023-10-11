@@ -48,7 +48,6 @@ enum GameState {
 #[derive(Eq, PartialEq, Hash, Debug)]
 enum OptionalModes { 
     Debug, 
-    ManualStepping
 }
 
 // maps Keycode value (from sdl2) to Chip8Input value (0-F) to simulate controller input 
@@ -385,7 +384,7 @@ fn execute(mut cpu: CPU, mut modes: HashSet<OptionalModes>) -> Result<(), String
     let mut prev_cpu_cycle_time: Instant = Instant::now(); 
     let mut prev_screen_refresh_time: Instant = Instant::now();
     let cpu_cycle_freq: u128 = 500;  
-    let screen_refresh_freq: u128 = 60; 
+    let screen_refresh_freq: u128 = 1000; 
     let keyboard_to_chip8_input_map: HashMap<SdlKeycode, Chip8Input> = build_keycode_hashmap(); 
 
     // enter main game loop 
@@ -413,11 +412,12 @@ fn execute(mut cpu: CPU, mut modes: HashSet<OptionalModes>) -> Result<(), String
                             draw_entire_window(&mut canvas, &cpu, &font, modes.contains(&OptionalModes::Debug), &state);
                         },
                         SdlKeycode::RShift => {
-                            if modes.contains(&OptionalModes::ManualStepping) {
-                                manual_step_signal = true; 
+                            match state {
+                                GameState::Paused => manual_step_signal = true, 
+                                _ => { }
                             }
                         },
-                        SdlKeycode::D => { 
+                        SdlKeycode::LShift => { 
 
                             // toggle 'Debug' in modes hashset 
                             if modes.contains(&OptionalModes::Debug) { 
@@ -446,16 +446,12 @@ fn execute(mut cpu: CPU, mut modes: HashSet<OptionalModes>) -> Result<(), String
             }
         }
 
-        // do not step with cpu if game is paused
-        if state == GameState::Paused { continue; }
-
         // process cpu instructions at specified cycle frequency
         if prev_cpu_cycle_time.elapsed().as_millis() >= 1_000 / cpu_cycle_freq { 
             prev_cpu_cycle_time = Instant::now(); 
 
-            // do not update if manual stepping is enabled and signal has not been sent
-            if !modes.contains(&OptionalModes::ManualStepping) || 
-                (modes.contains(&OptionalModes::ManualStepping) && manual_step_signal) {
+            // do not update if game is paused and manual step button has not been pressed
+            if state != GameState::Paused || (state == GameState::Paused && manual_step_signal) {
                 manual_step_signal = false; 
 
                 // get vector of pressed keys to be matched in cpu
@@ -523,7 +519,6 @@ fn parse_command_line_args() -> (Option<String>, HashSet<OptionalModes>) {
                 print_usage(); 
                 std::process::exit(0); 
             }, 
-            "-s" | "--step" => optional_modes.insert(OptionalModes::ManualStepping), 
             _ if ch8_re_pattern.is_match(value.as_str()) => {
                 filename = Some(value.to_owned()); 
                 true
@@ -545,11 +540,10 @@ fn print_usage() {
    OPTIONS: 
      -d | --debug -> turns on debugging information about current instructions and memory
      -h | --help  -> print usage and return
-     -s | --step  -> turns on manual stepping
 
    KEY COMMANDS (while program is running): 
      ESCAPE  : reset ROM and set CPU to PAUSED
-     D       : toggle debugging interface in window
+     L_SHIFT : toggle debugging interface in window
      RETURN  : manually step through CPU
      SPACE   : toggle CPU state between PAUSED and RUNNING
 "

@@ -15,7 +15,6 @@ PROJECT_NAME='chip8'
 CLEAR_FLAG=false
 TEST_FLAG=false
 DEBUG_MSG_FLAG=''
-MANUAL_STEP_FLAG=''
 HELP_FLAG=''
 FILENAME=''
 
@@ -33,16 +32,12 @@ while [[ $# -gt 0 ]]; do
             HELP_FLAG='-h'
             shift
             ;;
-        -s|--step) 
-            MANUAL_STEP_FLAG='-s'
-            shift
-            ;; 
         -t|--test) 
             TEST_FLAG=true
             shift
             ;; 
         -*|--*) 
-            echo "Unknown option $1"
+            echo "BUILD SCRIPT:: unknown option $1"
             exit 1
             ;; 
         *) 
@@ -70,9 +65,9 @@ fi
 # run executable
 echo 'STDOUT:'
 if [ "$FILENAME" = "" ] ; then 
-    ./target/debug/$PROJECT_NAME $DEBUG_MSG_FLAG $MANUAL_STEP_FLAG $HELP_FLAG
+    ./target/debug/$PROJECT_NAME $DEBUG_MSG_FLAG $HELP_FLAG
 else 
-    ./target/debug/$PROJECT_NAME $DEBUG_MSG_FLAG $MANUAL_STEP_FLAG $HELP_FLAG "$FILENAME"
+    ./target/debug/$PROJECT_NAME $DEBUG_MSG_FLAG $HELP_FLAG "$FILENAME"
 fi
 
 # check exit status

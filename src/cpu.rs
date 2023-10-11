@@ -212,7 +212,10 @@ pub mod cpu {
                     pc_inc = false; 
                     self.opcode_1nnn(instruction)
                 }, 
-                0x2000 => self.opcode_2nnn(instruction), 
+                0x2000 => {
+                    pc_inc = false; 
+                    self.opcode_2nnn(instruction)
+                }, 
                 0x3000 => self.opcode_3xnn(instruction), 
                 0x4000 => self.opcode_4xnn(instruction), 
                 0x5000 => self.opcode_5xy0(instruction), 
@@ -326,11 +329,10 @@ pub mod cpu {
             self.registers[x] = nn as u8; 
         }
 
-        // TODO: check possibility of overflow
         fn opcode_7xnn(&mut self, instruction: usize) { 
             let x: usize = (instruction & 0x0F00) >> 8; 
             let nn: usize = instruction & 0x00FF;
-            self.registers[x] += nn as u8; 
+            self.registers[x] = ((self.registers[x] as usize + nn) & 0xFF) as u8; 
         }
 
         // Vx = Vy
@@ -361,20 +363,32 @@ pub mod cpu {
             self.registers[x] ^= self.registers[y];
         }
 
-        // TODO: check overflow
         // Vx += Vy
         fn opcode_8xy4(&mut self, instruction: usize) { 
             let x: usize = (instruction & 0x0F00) >> 8; 
             let y: usize = (instruction & 0x00F0) >> 4;
-            self.registers[x] += self.registers[y];
+
+            if self.registers[x] as usize + self.registers[y] as usize > u8::MAX as usize{ 
+                self.registers[0xF] = 1; 
+            } else { 
+                self.registers[0xF] = 0; 
+            }
+
+            self.registers[x] = ((self.registers[x] as usize + self.registers[y] as usize) & 0xFF) as u8 ;
         }
 
-        // TODO: check underflow
         // Vx -= Vy
         fn opcode_8xy5(&mut self, instruction: usize) { 
             let x: usize = (instruction & 0x0F00) >> 8; 
             let y: usize = (instruction & 0x00F0) >> 4;
-            self.registers[x] -= self.registers[y];
+
+            if (self.registers[x] as isize - self.registers[y] as isize) < 0 { 
+                self.registers[0xF] = 1; 
+            } else { 
+                self.registers[0xF] = 0; 
+            }
+
+            self.registers[x] = ((self.registers[x] as isize - self.registers[y] as isize) & 0xFF) as u8 ;
         }
 
         // Vx >>= 1
@@ -388,7 +402,14 @@ pub mod cpu {
         fn opcode_8xy7(&mut self, instruction: usize) { 
             let x: usize = (instruction & 0x0F00) >> 8; 
             let y: usize = (instruction & 0x00F0) >> 4;
-            self.registers[x] = self.registers[y] - self.registers[x];
+
+            if (self.registers[y] as isize - self.registers[x] as isize) < 0 { 
+                self.registers[0xF] = 1; 
+            } else { 
+                self.registers[0xF] = 0; 
+            }
+
+            self.registers[x] = ((self.registers[y] as isize - self.registers[x] as isize) & 0xFF) as u8 ;
         }
 
         // Vx <<= 1
@@ -437,6 +458,8 @@ pub mod cpu {
                 let mut row: u8 = self.memory[self.reg_i + row_idx]; 
                 for col_idx in 0..8 { 
                     let pixels_idx = sprite_start + row_idx * SCREEN_WIDTH + col_idx; 
+                    if pixels_idx >= self.pixels.len() { continue; }
+
                     let sprite_pixel = (row >> 7) & 0x1; 
                     let existing_pixel = self.pixels[pixels_idx] as u8; 
                     if existing_pixel == 1 && sprite_pixel == 1 {
@@ -493,7 +516,6 @@ pub mod cpu {
             self.sound_timer = self.registers[x];
         }
 
-        // TODO: check overflow
         // I += Vx
         fn opcode_fx1e(&mut self, instruction: usize) {
             let x: usize = (instruction & 0x0F00) >> 8; 
@@ -532,7 +554,7 @@ pub mod cpu {
         // LD Vx, [I] -> load V0-Vx with memory starting at I
         fn opcode_fx65(&mut self, instruction: usize) {
             let x: usize = (instruction & 0x0F00) >> 8; 
-            for i in 0..x { 
+            for i in 0..=x { 
                 self.registers[i] = self.memory[self.reg_i+i]; 
             }
         }
