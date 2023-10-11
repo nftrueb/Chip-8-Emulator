@@ -1,15 +1,25 @@
 mod cpu; 
-pub use cpu::cpu::{CPU, SCREEN_WIDTH, SCREEN_HEIGHT, Chip8Input, get_chip8_key_idx}; 
+pub use cpu::cpu::{CPU, SCREEN_HEIGHT, SCREEN_WIDTH, Chip8Input, get_chip8_key_idx}; 
+
+mod renderer;
+pub use renderer::renderer::{
+    write_text,
+    draw_entire_window, 
+    draw_register_region, 
+    draw_pc_region, 
+    draw_i_region, 
+    CANVAS_WIDTH, 
+    CANVAS_HEIGHT,
+    DEBUG_CANVAS_WIDTH, 
+    DEBUG_CANVAS_HEIGHT
+};
 
 extern crate sdl2;
 
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode as SdlKeycode;
-use sdl2::pixels::Color;
-use sdl2::rect::Rect;
 use sdl2::render::Canvas;
 use sdl2::video::Window; 
-use sdl2::ttf::Font;
 use regex::Regex; 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -21,29 +31,8 @@ use std::io::Read;
 use std::process; 
 use std::path::Path; 
  
-const PIXEL_WIDTH  : usize = 10; 
-const CANVAS_WIDTH : usize = SCREEN_WIDTH * PIXEL_WIDTH; 
-const CANVAS_HEIGHT: usize = SCREEN_HEIGHT * PIXEL_WIDTH; 
 const OSA_SCRIPTS_PATH: &str = "/Users/nicktrueb/.osascripts";
-const BACKGROUND_COLOR: Color = Color::RGB(50, 50, 150); 
-const DEBUG_CANVAS_WIDTH: usize = CANVAS_WIDTH * 2; 
-const DEBUG_CANVAS_HEIGHT: usize = CANVAS_HEIGHT * 2; 
-const REGION_WIDTH      : i32 = CANVAS_WIDTH as i32; 
-const REGION_HEIGHT     : i32 = CANVAS_HEIGHT as i32; 
-const REGION_ROM_X      : i32 = 0; 
-const REGION_ROM_Y      : i32 = 0; 
-const REGION_REGISTER_X : i32 = REGION_WIDTH; 
-const REGION_REGISTER_Y : i32 = 0;
-const REGION_PC_X       : i32 = 0; 
-const REGION_PC_Y       : i32 = REGION_HEIGHT; 
-const REGION_I_X        : i32 = REGION_WIDTH; 
-const REGION_I_Y        : i32 = REGION_HEIGHT;  
-
-#[derive(PartialEq, Debug)]
-enum GameState { 
-    Running, 
-    Paused,
-}
+const FONT_PATH: &str = "/Users/nicktrueb/Programming/chip8/assets/FragmentMono-Regular.ttf";
 
 #[derive(Eq, PartialEq, Hash, Debug)]
 enum OptionalModes { 
@@ -77,262 +66,6 @@ fn build_keycode_hashmap() -> HashMap<SdlKeycode, Chip8Input>{
         (SdlKeycode::C, Chip8Input::B), 
         (SdlKeycode::V, Chip8Input::F),
     ])
-}
-
-fn write_text(text: String, x_off: i32, y_off: i32, color: Color, font: &Font, canvas: &mut Canvas<Window>) { 
-    // text surface 
-    let surface = 
-        font.render(&text)
-            .blended(color)
-            .expect("ERROR:: failed to render text"); 
-
-    // text texture 
-    let texture_creator = canvas.texture_creator();
-    let texture = texture_creator
-        .create_texture_from_surface(&surface)
-        .expect("ERROR: failed to create text texture");
-    let (width, height) = surface.size(); 
-
-    // copy text to canvas
-    let x = x_off - ((width/ 2) as i32);
-    canvas.copy(&texture, None, Rect::new(x, y_off, width, height))
-        .expect("ERROR:: failed to copy text to canvas");
-}
-
-fn draw_rom_region(canvas: &mut Canvas<Window>, pixels: &[bool; 2048]) { 
-    for (idx, pixel) in pixels.into_iter().enumerate() { 
-        let row: usize = idx / SCREEN_WIDTH; 
-        let col: usize = idx % SCREEN_WIDTH;
-        let rect = Rect::new(
-            (col * PIXEL_WIDTH) as i32, 
-            (row * PIXEL_WIDTH) as i32, 
-            PIXEL_WIDTH as u32, 
-            PIXEL_WIDTH as u32
-        );
-        let color: Color = if *pixel { 
-            Color::WHITE
-        } else { 
-            Color::BLACK
-        };
-        
-        canvas.set_draw_color(color);
-        canvas.fill_rect(rect).expect("rect not filled correctly when drawing screen!!");
-        // println!("{:?}", rect); 
-    }
-}
-
-fn draw_register_region(cpu: &CPU, canvas: &mut Canvas<Window>, font: &Font) { 
-    let row_height = 2*font.height(); 
-    let columns = 4; 
-    let title_row = 0; 
-    let v_register_row = 1; 
-    let i_register_row = 5; 
-    let pc_row = 5;
-
-    // write title for this region
-    write_text("--- REGISTERS ---".to_string(), 
-        REGION_REGISTER_X + (REGION_WIDTH / 2), 
-        REGION_REGISTER_Y + row_height * title_row, 
-        Color::WHITE, 
-        font, 
-        canvas);
-
-    // write grid of registers and their values
-    for (idx, value) in cpu.registers.iter().enumerate() { 
-        let x_off = REGION_REGISTER_X + (REGION_WIDTH / (columns + 1)) * ((idx as i32 % columns) + 1); 
-        let y_off = REGION_REGISTER_Y + (row_height * v_register_row) + (row_height * (idx as i32 / columns));
-        write_text(
-            format!("V{:X}: {:#04x}", idx, value), 
-            x_off, 
-            y_off,
-            Color::WHITE, 
-            font, 
-            canvas); 
-    }
-
-    // write I register value
-    {
-        let x_off = REGION_REGISTER_X + REGION_WIDTH / (columns + 1); 
-        let y_off = REGION_REGISTER_Y + row_height * i_register_row; 
-        write_text(
-            format!("I : x{:03x}", cpu.reg_i), 
-            x_off, 
-            y_off,
-            Color::WHITE, 
-            font, 
-            canvas); 
-    }
-
-    // write PC value
-    {
-        let x_off = REGION_REGISTER_X + REGION_WIDTH / (columns + 1) * 2; 
-        let y_off = REGION_REGISTER_Y + row_height * pc_row; 
-        write_text(
-            format!("PC: x{:03x}", cpu.pc), 
-            x_off, 
-            y_off,
-            Color::WHITE, 
-            font, 
-            canvas); 
-    }
-}
-
-fn draw_pc_region(cpu: &CPU, canvas: &mut Canvas<Window>, font: &Font) { 
-    let row_height = 2*font.height(); 
-    let columns = 4; 
-    let title_row = 0; 
-    let memory_row = 1; 
-
-    // write title for this region
-    write_text("--- PC POINTER ---".to_string(), 
-        REGION_PC_X + (REGION_WIDTH / 2), 
-        REGION_PC_Y + row_height * title_row, 
-        Color::WHITE, 
-        font, 
-        canvas);
-
-    // address and memory header
-    { 
-        let x_off = REGION_PC_X + (REGION_WIDTH / (columns + 1)) * 2; 
-        let y_off = REGION_PC_Y + (row_height * memory_row);
-        write_text(
-            "ADDR".to_string(), 
-            x_off, 
-            y_off,
-            Color::WHITE, 
-            font, 
-            canvas); 
-    }
-
-    { 
-        let x_off = REGION_PC_X + (REGION_WIDTH / (columns + 1)) * 3; 
-        let y_off = REGION_PC_Y + (row_height * memory_row);
-        write_text(
-            "MEM_".to_string(), 
-            x_off, 
-            y_off,
-            Color::WHITE, 
-            font, 
-            canvas); 
-    }
-
-    // draw pc and it's matching memory
-    for i in 0..5 { 
-        if cpu.pc + (i*2) >= 0x1000 { continue; }
-        {
-            let x_off = REGION_PC_X + (REGION_WIDTH / (columns + 1)) * 2; 
-            let y_off = REGION_PC_Y + (row_height * (memory_row + 1 + i as i32));
-            write_text(
-                format!("{:#04x}", cpu.pc + (i*2)), 
-                x_off, 
-                y_off,
-                Color::WHITE, 
-                font, 
-                canvas); 
-        }
-        {
-            let x_off = REGION_PC_X + (REGION_WIDTH / (columns + 1)) * 3; 
-            let y_off = REGION_PC_Y + (row_height * (memory_row + 1 + i as i32));
-            write_text(
-                format!("{:02x}{:02x}", cpu.memory[cpu.pc+i], cpu.memory[cpu.pc+i+1]), 
-                x_off, 
-                y_off,
-                Color::WHITE, 
-                font, 
-                canvas); 
-        }
-    }
-} 
-
-fn draw_i_region(cpu: &CPU, canvas: &mut Canvas<Window>, font: &Font) { 
-    let row_height = 2*font.height(); 
-    let columns = 4; 
-    let title_row = 0; 
-    let memory_row = 1; 
-
-    // write title for this region
-    write_text("--- I REGISTER POINTER ---".to_string(), 
-        REGION_I_X + (REGION_WIDTH / 2), 
-        REGION_I_Y + row_height * title_row, 
-        Color::WHITE, 
-        font, 
-        canvas);
-
-    // address and memory header
-    { 
-        let x_off = REGION_I_X + (REGION_WIDTH / (columns + 1)) * 2; 
-        let y_off = REGION_I_Y + (row_height * memory_row);
-        write_text(
-            "ADDR".to_string(), 
-            x_off, 
-            y_off,
-            Color::WHITE, 
-            font, 
-            canvas); 
-    }
-
-    { 
-        let x_off = REGION_I_X + (REGION_WIDTH / (columns + 1)) * 3; 
-        let y_off = REGION_I_Y + (row_height * memory_row);
-        write_text(
-            "MEM_".to_string(), 
-            x_off, 
-            y_off,
-            Color::WHITE, 
-            font, 
-            canvas); 
-    }
-
-    // draw pc and it's matching memory
-    for i in 0..5 { 
-        if cpu.reg_i + (i*2) >= 0x1000 { continue; }
-        {
-            let x_off = REGION_I_X + (REGION_WIDTH / (columns + 1)) * 2; 
-            let y_off = REGION_I_Y + (row_height * (memory_row + 1 + i as i32));
-            write_text(
-                format!("{:#04x}", cpu.reg_i + (i*2)), 
-                x_off, 
-                y_off,
-                Color::WHITE, 
-                font, 
-                canvas); 
-        }
-        {
-            let x_off = REGION_I_X + (REGION_WIDTH / (columns + 1)) * 3; 
-            let y_off = REGION_I_Y + (row_height * (memory_row + 1 + i as i32));
-            write_text(
-                format!("{:02x}{:02x}", cpu.memory[cpu.reg_i+i], cpu.memory[cpu.reg_i+i+1]), 
-                x_off, 
-                y_off,
-                Color::WHITE, 
-                font, 
-                canvas); 
-        }
-    }
-}
-
-fn draw_entire_window(canvas: &mut Canvas<Window>, cpu: &CPU, font: &Font, debug: bool, state: &GameState) { 
-    canvas.set_draw_color(BACKGROUND_COLOR); 
-    canvas.clear();
-
-    if debug { 
-        draw_register_region(cpu, canvas, font); 
-        draw_pc_region(cpu, canvas, font); 
-        draw_i_region(cpu, canvas, font); 
-    }
-
-    draw_rom_region(canvas, &cpu.pixels); 
-
-    if state == &GameState::Paused { 
-        write_text("PRESS [SPACE] TO START ROM".to_string(),
-            REGION_ROM_X + REGION_WIDTH / 2, 
-            REGION_ROM_Y + REGION_HEIGHT / 2, 
-            Color::GRAY, 
-            font, 
-            canvas)
-    }
-
-    canvas.present(); 
 }
 
 fn execute(mut cpu: CPU, mut modes: HashSet<OptionalModes>) -> Result<(), String> { 
@@ -369,29 +102,28 @@ fn execute(mut cpu: CPU, mut modes: HashSet<OptionalModes>) -> Result<(), String
 
     // load font 
     let point_size = 18; 
-    let font = ttf_context.load_font(
-        Path::new("/Users/nicktrueb/Programming/chip8/assets/FragmentMono-Regular.ttf"), 
-        point_size
-    ).expect("ERROR: failed to load external font"); 
+    let font = ttf_context.load_font(Path::new(FONT_PATH), point_size)
+        .expect("ERROR: failed to load external font"); 
 
     // reset canvas and update window
-    let mut state: GameState = GameState::Paused;
-    draw_entire_window(&mut canvas, &cpu, &font, modes.contains(&OptionalModes::Debug), &state); 
+    let mut paused_state = true; 
+    draw_entire_window(&mut canvas, &cpu, &font, modes.contains(&OptionalModes::Debug), paused_state); 
 
     let mut event_pump = sdl_context.event_pump()?;
-    let mut should_render_screen: bool = true; 
     let mut manual_step_signal: bool = false; 
     let mut prev_cpu_cycle_time: Instant = Instant::now(); 
     let mut prev_screen_refresh_time: Instant = Instant::now();
-    let cpu_cycle_freq: u128 = 500;  
-    let screen_refresh_freq: u128 = 1000; 
+    let mut timer_refresh_time: Instant = Instant::now(); 
+    let cpu_cycle_freq:u128 = 60;  
+    let screen_refresh_freq: u128 = 60; 
+    let timer_update_freq: u128 = 60; 
     let keyboard_to_chip8_input_map: HashMap<SdlKeycode, Chip8Input> = build_keycode_hashmap(); 
 
     // enter main game loop 
     'running: loop {
 
         // event handling
-        for event in event_pump.poll_iter() {
+        for event in event_pump.poll_event() {
             match event {
                 Event::Quit { .. } => break 'running, 
                 Event::KeyUp {
@@ -401,21 +133,15 @@ fn execute(mut cpu: CPU, mut modes: HashSet<OptionalModes>) -> Result<(), String
                     match key {
                         SdlKeycode::Escape => {
                             cpu.reset(); 
-                            state = GameState::Paused;
-                            draw_entire_window(&mut canvas, &cpu, &font, modes.contains(&OptionalModes::Debug), &state); 
+                            paused_state = true;
+                            draw_entire_window(&mut canvas, &cpu, &font, modes.contains(&OptionalModes::Debug), paused_state); 
                         }, 
                         SdlKeycode::Space => {
-                            state = match state {  
-                                GameState::Paused  => GameState::Running, 
-                                GameState::Running => GameState::Paused
-                            }; 
-                            draw_entire_window(&mut canvas, &cpu, &font, modes.contains(&OptionalModes::Debug), &state);
+                            paused_state = !paused_state; 
+                            draw_entire_window(&mut canvas, &cpu, &font, modes.contains(&OptionalModes::Debug), paused_state);
                         },
                         SdlKeycode::RShift => {
-                            match state {
-                                GameState::Paused => manual_step_signal = true, 
-                                _ => { }
-                            }
+                            if paused_state { manual_step_signal = true; }
                         },
                         SdlKeycode::LShift => { 
 
@@ -437,7 +163,7 @@ fn execute(mut cpu: CPU, mut modes: HashSet<OptionalModes>) -> Result<(), String
                                 .window_mut()
                                 .set_size(width, height)
                                 .expect("Failed to resize window"); 
-                            draw_entire_window(&mut canvas, &cpu, &font, modes.contains(&OptionalModes::Debug), &state); 
+                            draw_entire_window(&mut canvas, &cpu, &font, modes.contains(&OptionalModes::Debug), paused_state); 
                         } 
                         _ => {}, 
                     }
@@ -446,12 +172,18 @@ fn execute(mut cpu: CPU, mut modes: HashSet<OptionalModes>) -> Result<(), String
             }
         }
 
+        // update cpu timers
+        if timer_refresh_time.elapsed().as_millis() >= 1_000 / timer_update_freq { 
+            timer_refresh_time = Instant::now(); 
+            cpu.update_timers();
+        }
+
         // process cpu instructions at specified cycle frequency
-        if prev_cpu_cycle_time.elapsed().as_millis() >= 1_000 / cpu_cycle_freq { 
+        if prev_cpu_cycle_time.elapsed().as_millis() >= 1_000 / cpu_cycle_freq {
             prev_cpu_cycle_time = Instant::now(); 
 
             // do not update if game is paused and manual step button has not been pressed
-            if state != GameState::Paused || (state == GameState::Paused && manual_step_signal) {
+            if !paused_state || (paused_state && manual_step_signal) {
                 manual_step_signal = false; 
 
                 // get vector of pressed keys to be matched in cpu
@@ -465,15 +197,15 @@ fn execute(mut cpu: CPU, mut modes: HashSet<OptionalModes>) -> Result<(), String
                         .map(|key| get_chip8_key_idx(key))
                         .collect(); 
 
-                let needs_rendering = cpu.step(pressed_keys);
-                if !should_render_screen { should_render_screen = needs_rendering };
+                cpu.step(pressed_keys);
             }
         }
 
         // draw pixels on canvas at specified screen refresh frequency
         if prev_screen_refresh_time.elapsed().as_millis() >= 1_000 / screen_refresh_freq { 
+            println!("{}", prev_screen_refresh_time.elapsed().as_millis()); 
             prev_screen_refresh_time = Instant::now(); 
-            draw_entire_window(&mut canvas, &cpu, &font, modes.contains(&OptionalModes::Debug), &state); 
+            draw_entire_window(&mut canvas, &cpu, &font, modes.contains(&OptionalModes::Debug), paused_state); 
         }
     }
 

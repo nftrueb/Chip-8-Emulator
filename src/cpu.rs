@@ -188,16 +188,16 @@ pub mod cpu {
             false
         }
 
-        pub fn step(&mut self, pressed_keys: Vec<usize>) -> bool { 
-
-            // decrement timers
+        pub fn update_timers(&mut self) { 
             if self.delay_timer > 0 { self.delay_timer -= 1; }
             if self.sound_timer > 0 { self.sound_timer -= 1; }
+        }
 
+        pub fn step(&mut self, pressed_keys: Vec<usize>) { 
+            
             // get next instruction 
             let instruction: usize = ((self.memory[self.pc] as usize) << 8) + self.memory[self.pc+1] as usize; 
             let mut pc_inc: bool = true;
-            let mut should_render_screen: bool = false; 
 
             // execute instruction 
             match instruction & 0xF000 { 
@@ -239,10 +239,7 @@ pub mod cpu {
                 0xA000 => self.opcode_annn(instruction), 
                 0xB000 => self.opcode_bnnn(instruction), 
                 0xC000 => self.opcode_cxnn(instruction), 
-                0xD000 => {
-                    self.opcode_dxyn(instruction);
-                    should_render_screen = true; 
-                }, 
+                0xD000 => self.opcode_dxyn(instruction), 
                 0xE000 => {
                     match instruction & 0x00FF { 
                         0x009E => self.opcode_ex9e(instruction, pressed_keys),
@@ -269,8 +266,6 @@ pub mod cpu {
 
             // increment pc 
             self.pc += if pc_inc { 2 } else { 0 }; 
-
-            should_render_screen
         }
 
         // ------------------------
