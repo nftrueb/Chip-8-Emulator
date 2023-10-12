@@ -1,7 +1,4 @@
-pub mod renderer {
-
-    extern crate sdl2; 
-
+pub mod video {
     use sdl2::rect::Rect; 
     use sdl2::rect::Point; 
     use sdl2::pixels::Color; 
@@ -23,8 +20,8 @@ pub mod renderer {
     const BACKGROUND_COLOR       : Color = Color::RGB(50, 50, 150);
     const REGION_WIDTH           : i32 = CANVAS_WIDTH as i32; 
     const REGION_HEIGHT          : i32 = CANVAS_HEIGHT as i32; 
-    const ROM_REGION             : usize = 1; 
-    const REGISTERS_REGION       : usize = 0; 
+    const ROM_REGION             : usize = 0; 
+    const REGISTERS_REGION       : usize = 1; 
     const PC_REGION              : usize = 2; 
     const I_REGION               : usize = 3; 
     const REGIONS: [(i32, i32); 4] = [
@@ -178,13 +175,13 @@ pub mod renderer {
         }
 
         // draw pc and it's matching memory
-        for i in 0..5 { 
+        for i in (0..10).step_by(2) { 
             if cpu.pc + (i*2) >= 0x1000 { continue; }
             {
                 let x_off = region_x + (REGION_WIDTH / (columns + 1)) * 2; 
-                let y_off = region_y + (row_height * (memory_row + 1 + i as i32));
+                let y_off = region_y + (row_height * (memory_row + 1 + (i/2) as i32));
                 write_text(
-                    format!("{:#04x}", cpu.pc + (i*2)), 
+                    format!("{:#04x}", cpu.pc + i), 
                     x_off, 
                     y_off,
                     Color::WHITE, 
@@ -193,7 +190,7 @@ pub mod renderer {
             }
             {
                 let x_off = region_x + (REGION_WIDTH / (columns + 1)) * 3; 
-                let y_off = region_y + (row_height * (memory_row + 1 + i as i32));
+                let y_off = region_y + (row_height * (memory_row + 1 + (i/2) as i32));
                 write_text(
                     format!("{:02x}{:02x}", cpu.memory[cpu.pc+i], cpu.memory[cpu.pc+i+1]), 
                     x_off, 
@@ -246,13 +243,13 @@ pub mod renderer {
         }
 
         // draw pc and it's matching memory
-        for i in 0..5 { 
+        for i in (0..10).step_by(2) { 
             if cpu.reg_i + (i*2) >= 0x1000 { continue; }
             {
                 let x_off = region_x + (REGION_WIDTH / (columns + 1)) * 2; 
-                let y_off = region_y + (row_height * (memory_row + 1 + i as i32));
+                let y_off = region_y + (row_height * (memory_row + 1 + (i/2) as i32));
                 write_text(
-                    format!("{:#04x}", cpu.reg_i + (i*2)), 
+                    format!("{:#04x}", cpu.reg_i + i), 
                     x_off, 
                     y_off,
                     Color::WHITE, 
@@ -261,7 +258,7 @@ pub mod renderer {
             }
             {
                 let x_off = region_x + (REGION_WIDTH / (columns + 1)) * 3; 
-                let y_off = region_y + (row_height * (memory_row + 1 + i as i32));
+                let y_off = region_y + (row_height * (memory_row + 1 + (i/2) as i32));
                 write_text(
                     format!("{:02x}{:02x}", cpu.memory[cpu.reg_i+i], cpu.memory[cpu.reg_i+i+1]), 
                     x_off, 

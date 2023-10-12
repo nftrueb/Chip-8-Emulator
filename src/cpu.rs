@@ -318,6 +318,7 @@ pub mod cpu {
             if self.registers[x] == self.registers[y] { self.pc += 2; }
         }
 
+        // Vx = NN
         fn opcode_6xnn(&mut self, instruction: usize) { 
             let x: usize = (instruction & 0x0F00) >> 8; 
             let nn: usize = instruction & 0x00FF;
@@ -524,24 +525,20 @@ pub mod cpu {
             self.reg_i = FONT_SPRITE_START_ADDRS[vx]; 
         }
 
-        // BCD of Vx stored in I -> if Vx 123 then I = 1, I+1 = 2, I+2 = 3
+        // BCD of Vx stored in I -> if Vx = 123 then I = 1, I+1 = 2, I+2 = 3
         fn opcode_fx33(&mut self, instruction: usize) {
             let x: usize = (instruction & 0x0F00) >> 8; 
-            let mut vx: u8 = self.registers[x] & 0xF; 
+            let vx: u8 = self.registers[x]; 
             
             self.memory[self.reg_i+2] = vx % 10;
-            vx /= 10; 
-
-            self.memory[self.reg_i+1] = vx % 10;
-            vx /= 10; 
-
-            self.memory[self.reg_i] = vx % 10; 
+            self.memory[self.reg_i+1] = (vx / 10) % 10; 
+            self.memory[self.reg_i] = (vx / 100) % 10; 
         }
 
         // LD [I], Vx -> store V0-Vx in memory starting at I
         fn opcode_fx55(&mut self, instruction: usize) {
             let x: usize = (instruction & 0x0F00) >> 8; 
-            for i in 0..x { 
+            for i in 0..=x { 
                 self.memory[self.reg_i+i] = self.registers[i]; 
             }
         }
@@ -569,6 +566,7 @@ mod tests {
         cpu.memory[0] = 0x00; 
         cpu.memory[1] = 0xe0;
         cpu.pixels[0] = true; 
+        cpu.pc = 0; 
 
         cpu.step(Vec::new()); 
 
@@ -582,6 +580,7 @@ mod tests {
         cpu.memory[1] = 0xee;
         cpu.stack[0] = 0xFFC; 
         cpu.sp = 1; 
+        cpu.pc = 0; 
 
         cpu.step(Vec::new()); 
 
@@ -592,12 +591,13 @@ mod tests {
     #[test] 
     fn should_jump_when_opcode_1nnn() { 
         let mut cpu = CPU::new(); 
+        cpu.pc = 0; 
         cpu.memory[0] = 0x11; 
         cpu.memory[1] = 0x20;
 
         cpu.step(Vec::new()); 
 
-        assert!(cpu.pc == 0x122); 
+        assert!(cpu.pc == 0x120); 
     }
 
     #[test]
@@ -605,12 +605,13 @@ mod tests {
         let mut cpu = CPU::new(); 
         cpu.memory[0] = 0x2F; 
         cpu.memory[1] = 0xFC;
+        cpu.pc = 0; 
 
         cpu.step(Vec::new()); 
 
         assert!(cpu.stack[0] == 0x0000);
         assert!(cpu.sp == 1); 
-        assert!(cpu.pc == 0xFFC + 2); 
+        assert!(cpu.pc == 0xFFC); 
     }
 
     #[test]
@@ -619,6 +620,7 @@ mod tests {
         cpu.memory[0] = 0x31; 
         cpu.memory[1] = 0x23;
         cpu.registers[1] = 0x23; 
+        cpu.pc = 0; 
 
         cpu.step(Vec::new()); 
 
@@ -630,7 +632,8 @@ mod tests {
         let mut cpu = CPU::new(); 
         cpu.memory[0] = 0x41; 
         cpu.memory[1] = 0x23;
-        cpu.registers[1] = 0x00; 
+        cpu.registers[1] = 0x00;
+        cpu.pc = 0;  
 
         cpu.step(Vec::new()); 
 
@@ -644,6 +647,7 @@ mod tests {
         cpu.memory[1] = 0x20;
         cpu.registers[1] = 0x8; 
         cpu.registers[2] = 0x8; 
+        cpu.pc = 0; 
 
         cpu.step(Vec::new()); 
 
@@ -655,6 +659,7 @@ mod tests {
         let mut cpu = CPU::new(); 
         cpu.memory[0] = 0x61; 
         cpu.memory[1] = 0x20;
+        cpu.pc = 0; 
 
         cpu.step(Vec::new()); 
 
@@ -667,6 +672,7 @@ mod tests {
         cpu.memory[0] = 0x71; 
         cpu.memory[1] = 0x20;
         cpu.registers[1] = 0xF; 
+        cpu.pc = 0; 
 
         cpu.step(Vec::new()); 
 
@@ -674,35 +680,17 @@ mod tests {
     }
 
     #[test]
-    fn should_set_vx_to_vy_when_opcode_8xy0() { }
+    fn test_opcode_fx33() { 
+        let mut cpu = CPU::new(); 
+        cpu.memory[0] = 0xf6; 
+        cpu.memory[1] = 0x33;
+        cpu.registers[6] = 0x89; 
+        cpu.reg_i = 2; 
+        cpu.pc = 0; 
 
-    #[test]
-    fn should_set_vx_to_or_with_vy_when_opcode_8xy1() { }
-
-    #[test]
-    fn should_set_vx_to_and_with_vy_when_opcode_8xy2() { }
-
-    #[test]
-    fn should_set_vx_to_xor_with_vy_when_opcode_8xy3() { }
-
-    #[test]
-    fn should_add_vy_to_vx_when_opcode_8xy4() { }
-
-    #[test]
-    fn should_subtract_vy_from_vx_when_opcode_8xy5() { }
-
-    #[test]
-    fn should_right_shift_vx_when_opcode_8xy6() { }
-
-    #[test]
-    fn should_set_vx_to_vx_subtracted_from_vy_when_opcode_8xy7() { }
-
-    #[test]
-    fn should_left_shift_vx_when_opcode_8xye() { }
-
-    // reset 
-
-    // load rom 
-
-    // step
+        cpu.step(Vec::new()); 
+        assert!(cpu.memory[cpu.reg_i] == 1); 
+        assert!(cpu.memory[cpu.reg_i+1] == 3);
+        assert!(cpu.memory[cpu.reg_i+2] == 7); 
+    }
 }

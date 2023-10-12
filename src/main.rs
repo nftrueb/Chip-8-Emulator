@@ -1,8 +1,8 @@
 mod cpu; 
 pub use cpu::cpu::{CPU, SCREEN_HEIGHT, SCREEN_WIDTH, Chip8Input, get_chip8_key_idx}; 
 
-mod renderer;
-pub use renderer::renderer::{
+mod video;
+pub use video::video::{
     write_text,
     draw_entire_window, 
     draw_register_region, 
@@ -14,22 +14,26 @@ pub use renderer::renderer::{
     DEBUG_CANVAS_HEIGHT
 };
 
+mod audio; 
+pub use audio::audio::SquareWave;
+
 extern crate sdl2;
 
+use regex::Regex;
+use sdl2::audio::AudioSpecDesired; 
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode as SdlKeycode;
 use sdl2::render::Canvas;
 use sdl2::video::Window; 
-use regex::Regex; 
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::time::Instant;
 use std::env; 
 use std::fs;
 use std::fs::File;  
 use std::io::Read; 
-use std::process; 
 use std::path::Path; 
+use std::process; 
+use std::time::Instant;
  
 const OSA_SCRIPTS_PATH: &str = "/Users/nicktrueb/.osascripts";
 const FONT_PATH: &str = "/Users/nicktrueb/Programming/chip8/assets/FragmentMono-Regular.ttf";
@@ -68,7 +72,7 @@ fn build_keycode_hashmap() -> HashMap<SdlKeycode, Chip8Input>{
     ])
 }
 
-fn execute(mut cpu: CPU, mut modes: HashSet<OptionalModes>) -> Result<(), String> { 
+fn execute(mut cpu: CPU, modes: &mut HashSet<OptionalModes>) -> Result<(), String> { 
 
     // initialize contexts 
     let sdl_context = 
@@ -76,10 +80,13 @@ fn execute(mut cpu: CPU, mut modes: HashSet<OptionalModes>) -> Result<(), String
         .expect("ERROR:: failed to initialize SDL context");
     let video_subsystem = 
         sdl_context.video()
-            .expect("ERROR: failed to load video subsystem");
+            .expect("ERROR:: failed to initialize video subsystem");
+    let audio_subsystem = 
+        sdl_context.audio()
+            .expect("ERROR:: failed to initialize audio subsystem");
     let ttf_context = 
         sdl2::ttf::init()
-            .expect("ERROR: failed to load ttf context"); 
+            .expect("ERROR:: failed to load ttf context"); 
 
     // get initial window instance
     let (width, height) = match modes.contains(&OptionalModes::Debug) { 
@@ -99,6 +106,27 @@ fn execute(mut cpu: CPU, mut modes: HashSet<OptionalModes>) -> Result<(), String
         .present_vsync()
         .build()
         .map_err(|e| e.to_string())?;
+
+    // initialize desired audio spec and open actual audio spec
+    let desired_spec = AudioSpecDesired { 
+        freq: Some(44100), 
+        channels: Some(1), 
+        samples: None
+    };
+
+    let audio_device = 
+        audio_subsystem.open_playback(
+            None, 
+            &desired_spec, 
+            |spec| { 
+                let phase_inc = 261.0 / spec.freq as f32; 
+                SquareWave { 
+                    phase: 0.0, 
+                    phase_inc,
+                    amplitude: 0.1,
+                }
+            }
+        ).expect("ERROR:: failed to initialize sound struct"); 
 
     // load font 
     let point_size = 18; 
@@ -175,7 +203,17 @@ fn execute(mut cpu: CPU, mut modes: HashSet<OptionalModes>) -> Result<(), String
         // update cpu timers
         if timer_refresh_time.elapsed().as_millis() >= 1_000 / timer_update_freq { 
             timer_refresh_time = Instant::now(); 
-            cpu.update_timers();
+            
+            if paused_state { 
+                audio_device.pause(); 
+            } else {
+                cpu.update_timers();
+                if cpu.sound_timer > 0 { 
+                    audio_device.resume();
+                } else { 
+                    audio_device.pause();
+                }
+            }
         }
 
         // process cpu instructions at specified cycle frequency
@@ -203,7 +241,6 @@ fn execute(mut cpu: CPU, mut modes: HashSet<OptionalModes>) -> Result<(), String
 
         // draw pixels on canvas at specified screen refresh frequency
         if prev_screen_refresh_time.elapsed().as_millis() >= 1_000 / screen_refresh_freq { 
-            println!("{}", prev_screen_refresh_time.elapsed().as_millis()); 
             prev_screen_refresh_time = Instant::now(); 
             draw_entire_window(&mut canvas, &cpu, &font, modes.contains(&OptionalModes::Debug), paused_state); 
         }
@@ -228,8 +265,8 @@ fn get_file_from_file_chooser_dialog() -> String {
         .to_string(); 
 
     if err_str.len() != 0 { 
-        println!("ERROR: failed to get file from file chooser dialog:\n{}", err_str); 
-        std::process::exit(1); 
+        println!("file not loaded from file chooser dialog ... exiting now"); 
+        std::process::exit(0); 
     }
 
     output_str
@@ -285,7 +322,7 @@ fn print_usage() {
 pub fn main() {
 
     // parse input file name
-    let (filename_option, modes)= parse_command_line_args(); 
+    let (filename_option, mut modes)= parse_command_line_args(); 
 
     // get file from dialog if filename was not parse in arguments
     let filename: String = match filename_option { 
@@ -293,9 +330,10 @@ pub fn main() {
         None => get_file_from_file_chooser_dialog()
     };
 
+    // match file to correct extension
     if !Regex::new("\\.ch8$").unwrap().is_match(&filename) { 
-        println!("ERROR: invalid filename: {}", filename); 
-        std::process::exit(1); 
+        println!("ERROR:: file does not have correct extension"); 
+        std::process::exit(1);
     }
 
     // open file 
@@ -320,11 +358,5 @@ pub fn main() {
     }  
 
     // run cpu
-    let _result = execute(cpu, modes); 
-    // match result { 
-    //     Ok(()) => {}, 
-    //     Err(_msg) => {}
-    // }
-
-    // handle restarting cpu, loading new rom, etc
+    execute(cpu, &mut modes).unwrap();
 }
